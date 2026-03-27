@@ -21,9 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Interactive branch picker (`-i`) with bubbletea TUI
 - Fuzzy search in interactive mode (`/` to search branch and remote names)
 - Checkout on `Enter` in interactive mode (creates local tracking branch for remotes)
+- Branch deletion in interactive mode (`d` for safe delete, `D` for force delete) with merge pre-check and confirmation prompt
 - Reverse-video selection with colored column gaps for clean highlighting
 - `--no-color` flag and `NO_COLOR` environment variable support
-- Makefile with `build`, `install`, `uninstall`, and `clean` targets
+- Makefile with `build`, `install`, `uninstall`, `clean`, `test`, and `lint` targets
 
 [Unreleased]: https://github.com/redodson01/git-better-branch/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/redodson01/git-better-branch/releases/tag/v0.1.0

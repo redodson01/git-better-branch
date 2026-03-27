@@ -32,6 +32,14 @@ type tuiModel struct {
 	filteredIdx []int // indices into items matching the query
 	savedCursor int   // cursor before entering search
 	savedOffset int   // offset before entering search
+
+	// Delete confirmation state.
+	confirming   bool
+	confirmForce bool
+
+	// Transient status message (cleared on next keypress).
+	statusMsg   string
+	statusIsErr bool
 }
 
 func runInteractive(branches []Branch, tw, th int) error {
@@ -90,7 +98,7 @@ func runInteractive(branches []Branch, tw, th int) error {
 	return nil
 }
 
-func checkoutBranch(b *Branch) error {
+var checkoutBranch = func(b *Branch) error {
 	name := b.Name
 	if b.IsRemote {
 		name = b.DisplayName
@@ -108,6 +116,28 @@ func checkoutBranch(b *Branch) error {
 	return nil
 }
 
+var gitBranchDelete = func(name string, force bool) (string, error) {
+	deleteFlag := "-d"
+	if force {
+		deleteFlag = "-D"
+	}
+	cmd := exec.Command("git", "branch", deleteFlag, "--", name)
+	out, err := cmd.CombinedOutput()
+	output := strings.TrimSpace(string(out))
+	if err != nil {
+		if output != "" {
+			line := strings.SplitN(output, "\n", 2)[0]
+			return "", fmt.Errorf("%s", strings.TrimPrefix(line, "error: "))
+		}
+		return "", fmt.Errorf("git branch %s: %w", deleteFlag, err)
+	}
+	return output, nil
+}
+
+var isBranchMerged = func(name string) bool {
+	return exec.Command("git", "merge-base", "--is-ancestor", "--", name, "HEAD").Run() == nil
+}
+
 // --- bubbletea Model interface ---
 
 func (m tuiModel) Init() tea.Cmd {
@@ -121,6 +151,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.th = msg.Height
 		m.cw = computeWidths(m.allBranches, m.tw)
 	case tea.KeyMsg:
+		if m.confirming {
+			return m.updateConfirm(msg)
+		}
 		if m.searching {
 			return m.updateSearch(msg)
 		}
@@ -130,6 +163,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m.statusMsg = ""
 	switch msg.String() {
 	case "q", "esc", "ctrl+c":
 		return m, tea.Quit
@@ -146,12 +180,49 @@ func (m tuiModel) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		m.chosen = m.items[m.selIdx[m.cursor]].branch
 		return m, tea.Quit
+	case "d", "D":
+		b := m.items[m.selIdx[m.cursor]].branch
+		if b.IsHead || b.WorktreePath != "" {
+			m.statusMsg = "cannot delete a branch that is checked out"
+			m.statusIsErr = true
+		} else if b.IsRemote {
+			m.statusMsg = "cannot delete a remote branch"
+			m.statusIsErr = true
+		} else if msg.String() == "d" && !isBranchMerged(b.Name) {
+			m.statusMsg = "not fully merged (use D to force)"
+			m.statusIsErr = true
+		} else {
+			m.confirming = true
+			m.confirmForce = msg.String() == "D"
+		}
 	case "/":
 		m.savedCursor = m.cursor
 		m.savedOffset = m.offset
 		m.searching = true
 		m.query = ""
 		m.filteredIdx = nil
+	}
+	return m, nil
+}
+
+func (m tuiModel) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y":
+		b := m.items[m.selIdx[m.cursor]].branch
+		output, err := gitBranchDelete(b.Name, m.confirmForce)
+		if err != nil {
+			m.statusMsg = err.Error()
+			m.statusIsErr = true
+		} else {
+			m.statusMsg = output
+			m.statusIsErr = false
+			m.removeCurrent()
+		}
+		m.confirming = false
+	case "ctrl+c":
+		return m, tea.Quit
+	default:
+		m.confirming = false
 	}
 	return m, nil
 }
@@ -241,10 +312,24 @@ func (m tuiModel) View() string {
 
 	// Status bar / search prompt.
 	lines = append(lines, "")
-	if m.searching {
+	if m.confirming {
+		b := m.items[m.selIdx[m.cursor]].branch
+		verb := "Delete"
+		if m.confirmForce {
+			verb = "Force delete"
+		}
+		prompt := fmt.Sprintf("  %s '%s'? [y/n]", verb, b.Name)
+		lines = append(lines, clr(cYellow, trunc(prompt, m.tw)))
+	} else if m.searching {
 		lines = append(lines, clr(cBold, "/") + m.query + clr(cDim, "▏"))
+	} else if m.statusMsg != "" {
+		c := cGreen
+		if m.statusIsErr {
+			c = cRed
+		}
+		lines = append(lines, clr(c, trunc("  "+m.statusMsg, m.tw)))
 	} else {
-		lines = append(lines, clr(cDim, "  Esc/q quit | ↑/↓ navigate | Enter checkout | / search"))
+		lines = append(lines, clr(cDim, "  Esc/q quit | ↑/↓ navigate | Enter checkout | / search | d/D delete"))
 	}
 
 	return strings.Join(lines, "\n")
@@ -316,7 +401,60 @@ func applySelection(line string, tw int) string {
 
 // --- viewport helpers ---
 
+func (m *tuiModel) removeCurrent() {
+	b := m.items[m.selIdx[m.cursor]].branch
+
+	// Remove from allBranches.
+	for i, ab := range m.allBranches {
+		if ab.Name == b.Name && ab.IsRemote == b.IsRemote {
+			m.allBranches = append(m.allBranches[:i], m.allBranches[i+1:]...)
+			break
+		}
+	}
+
+	// Rebuild items and selIdx from scratch.
+	var local, remote []Branch
+	for _, ab := range m.allBranches {
+		if ab.IsRemote {
+			remote = append(remote, ab)
+		} else {
+			local = append(local, ab)
+		}
+	}
+
+	m.items = nil
+	m.selIdx = nil
+
+	sortBranches(local)
+	for i := range local {
+		m.selIdx = append(m.selIdx, len(m.items))
+		m.items = append(m.items, listItem{branch: &local[i]})
+	}
+
+	if len(remote) > 0 {
+		m.items = append(m.items, listItem{blank: true})
+		sortBranches(remote)
+		for i := range remote {
+			m.selIdx = append(m.selIdx, len(m.items))
+			m.items = append(m.items, listItem{branch: &remote[i]})
+		}
+	}
+
+	if m.cursor >= len(m.selIdx) {
+		m.cursor = len(m.selIdx) - 1
+	}
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+
+	m.cw = computeWidths(m.allBranches, m.tw)
+	m.ensureVisible()
+}
+
 func (m *tuiModel) ensureVisible() {
+	if len(m.selIdx) == 0 {
+		return
+	}
 	viewH := m.viewHeight()
 
 	if m.searching && len(m.query) > 0 {

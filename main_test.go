@@ -2,8 +2,11 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestTrunc(t *testing.T) {
@@ -453,5 +456,374 @@ func TestApplySelection(t *testing.T) {
 	noColor := applySelection(line, 20)
 	if strings.Contains(noColor, "\033") {
 		t.Error("applySelection with colorOn=false: should not contain ANSI codes")
+	}
+}
+
+// --- Delete / TUI tests ---
+
+func runeKey(r rune) tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
+}
+
+func TestDeleteKeyGuards(t *testing.T) {
+	colorOn = false
+	defer func() { colorOn = false }()
+
+	savedMerged := isBranchMerged
+	defer func() { isBranchMerged = savedMerged }()
+	isBranchMerged = func(string) bool { return true }
+
+	items := []listItem{
+		{branch: &Branch{Name: "main", DisplayName: "main", IsHead: true}},
+		{branch: &Branch{Name: "feature", DisplayName: "feature"}},
+		{branch: &Branch{DisplayName: "dev", IsRemote: true, RemoteName: "origin"}},
+		{branch: &Branch{Name: "wt-branch", DisplayName: "wt-branch", WorktreePath: "wt"}},
+	}
+	m := tuiModel{
+		items:  items,
+		selIdx: []int{0, 1, 2, 3},
+		tw:     80,
+		th:     24,
+	}
+
+	// d on HEAD → error.
+	m.cursor = 0
+	result, _ := m.updateNormal(runeKey('d'))
+	rm := result.(tuiModel)
+	if !rm.statusIsErr || !strings.Contains(rm.statusMsg, "checked out") {
+		t.Errorf("d on HEAD: statusIsErr=%v msg=%q", rm.statusIsErr, rm.statusMsg)
+	}
+	if rm.confirming {
+		t.Error("d on HEAD: should not enter confirming")
+	}
+
+	// d on worktree branch → error.
+	m.cursor = 3
+	m.statusMsg = ""
+	result, _ = m.updateNormal(runeKey('d'))
+	rm = result.(tuiModel)
+	if !rm.statusIsErr || !strings.Contains(rm.statusMsg, "checked out") {
+		t.Errorf("d on worktree: statusIsErr=%v msg=%q", rm.statusIsErr, rm.statusMsg)
+	}
+
+	// d on remote → error.
+	m.cursor = 2
+	m.statusMsg = ""
+	result, _ = m.updateNormal(runeKey('d'))
+	rm = result.(tuiModel)
+	if !rm.statusIsErr || !strings.Contains(rm.statusMsg, "remote") {
+		t.Errorf("d on remote: statusIsErr=%v msg=%q", rm.statusIsErr, rm.statusMsg)
+	}
+
+	// d on merged local branch → confirmation.
+	m.cursor = 1
+	m.statusMsg = ""
+	result, _ = m.updateNormal(runeKey('d'))
+	rm = result.(tuiModel)
+	if !rm.confirming || rm.confirmForce {
+		t.Errorf("d merged: confirming=%v confirmForce=%v", rm.confirming, rm.confirmForce)
+	}
+
+	// d on unmerged local branch → error with hint.
+	isBranchMerged = func(string) bool { return false }
+	m.cursor = 1
+	m.statusMsg = ""
+	m.confirming = false
+	result, _ = m.updateNormal(runeKey('d'))
+	rm = result.(tuiModel)
+	if !rm.statusIsErr || !strings.Contains(rm.statusMsg, "not fully merged") {
+		t.Errorf("d unmerged: statusIsErr=%v msg=%q", rm.statusIsErr, rm.statusMsg)
+	}
+	if rm.confirming {
+		t.Error("d unmerged: should not enter confirming")
+	}
+
+	// D on unmerged local branch → still enters force confirmation.
+	m.cursor = 1
+	m.statusMsg = ""
+	m.confirming = false
+	result, _ = m.updateNormal(runeKey('D'))
+	rm = result.(tuiModel)
+	if !rm.confirming || !rm.confirmForce {
+		t.Errorf("D unmerged: confirming=%v confirmForce=%v", rm.confirming, rm.confirmForce)
+	}
+}
+
+func TestDeleteConfirmCancel(t *testing.T) {
+	colorOn = false
+	defer func() { colorOn = false }()
+
+	items := []listItem{
+		{branch: &Branch{Name: "main", DisplayName: "main", IsHead: true}},
+		{branch: &Branch{Name: "feature", DisplayName: "feature"}},
+	}
+	m := tuiModel{
+		items:      items,
+		selIdx:     []int{0, 1},
+		cursor:     1,
+		confirming: true,
+		tw:         80,
+		th:         24,
+	}
+
+	result, _ := m.updateConfirm(runeKey('n'))
+	rm := result.(tuiModel)
+	if rm.confirming {
+		t.Error("n should cancel confirmation")
+	}
+	if len(rm.selIdx) != 2 {
+		t.Errorf("after cancel: %d selectable, want 2", len(rm.selIdx))
+	}
+}
+
+func TestDeleteConfirmYes(t *testing.T) {
+	colorOn = false
+	defer func() { colorOn = false }()
+
+	saved := gitBranchDelete
+	defer func() { gitBranchDelete = saved }()
+	gitBranchDelete = func(name string, force bool) (string, error) {
+		return fmt.Sprintf("Deleted branch %s (was abc1234).", name), nil
+	}
+
+	branches := []Branch{
+		{Name: "main", DisplayName: "main", IsHead: true, ShortHash: "abc1234"},
+		{Name: "feature", DisplayName: "feature", ShortHash: "def5678"},
+	}
+	var items []listItem
+	var selIdx []int
+	for i := range branches {
+		selIdx = append(selIdx, len(items))
+		items = append(items, listItem{branch: &branches[i]})
+	}
+
+	m := tuiModel{
+		allBranches: append([]Branch{}, branches...),
+		items:       items,
+		selIdx:      selIdx,
+		cursor:      1,
+		confirming:  true,
+		tw:          80,
+		th:          24,
+	}
+
+	result, _ := m.updateConfirm(runeKey('y'))
+	rm := result.(tuiModel)
+	if rm.confirming {
+		t.Error("y should end confirmation")
+	}
+	if rm.statusIsErr {
+		t.Errorf("expected success, got error: %q", rm.statusMsg)
+	}
+	if !strings.Contains(rm.statusMsg, "Deleted") {
+		t.Errorf("status = %q, want to contain 'Deleted'", rm.statusMsg)
+	}
+	if len(rm.selIdx) != 1 {
+		t.Fatalf("after delete: %d selectable, want 1", len(rm.selIdx))
+	}
+}
+
+func TestDeleteConfirmError(t *testing.T) {
+	colorOn = false
+	defer func() { colorOn = false }()
+
+	saved := gitBranchDelete
+	defer func() { gitBranchDelete = saved }()
+	gitBranchDelete = func(name string, force bool) (string, error) {
+		return "", fmt.Errorf("The branch '%s' is not fully merged.", name)
+	}
+
+	branches := []Branch{
+		{Name: "main", DisplayName: "main", IsHead: true, ShortHash: "abc1234"},
+		{Name: "feature", DisplayName: "feature", ShortHash: "def5678"},
+	}
+	var items []listItem
+	var selIdx []int
+	for i := range branches {
+		selIdx = append(selIdx, len(items))
+		items = append(items, listItem{branch: &branches[i]})
+	}
+
+	m := tuiModel{
+		allBranches: append([]Branch{}, branches...),
+		items:       items,
+		selIdx:      selIdx,
+		cursor:      1,
+		confirming:  true,
+		tw:          80,
+		th:          24,
+	}
+
+	result, _ := m.updateConfirm(runeKey('y'))
+	rm := result.(tuiModel)
+	if !rm.statusIsErr {
+		t.Error("expected error status")
+	}
+	if !strings.Contains(rm.statusMsg, "not fully merged") {
+		t.Errorf("error = %q, want 'not fully merged'", rm.statusMsg)
+	}
+	// Branch should NOT be removed on error.
+	if len(rm.selIdx) != 2 {
+		t.Errorf("after failed delete: %d selectable, want 2", len(rm.selIdx))
+	}
+}
+
+func TestRemoveCurrent(t *testing.T) {
+	colorOn = false
+	defer func() { colorOn = false }()
+
+	branches := []Branch{
+		{Name: "main", DisplayName: "main", IsHead: true, ShortHash: "abc1234"},
+		{Name: "feature", DisplayName: "feature", ShortHash: "def5678"},
+		{Name: "bugfix", DisplayName: "bugfix", ShortHash: "ghi9012"},
+	}
+	var items []listItem
+	var selIdx []int
+	for i := range branches {
+		selIdx = append(selIdx, len(items))
+		items = append(items, listItem{branch: &branches[i]})
+	}
+
+	m := tuiModel{
+		allBranches: append([]Branch{}, branches...),
+		items:       items,
+		selIdx:      selIdx,
+		cursor:      1, // pointing at "feature"
+		tw:          80,
+		th:          24,
+	}
+
+	m.removeCurrent()
+
+	if len(m.selIdx) != 2 {
+		t.Fatalf("after remove: %d selectable, want 2", len(m.selIdx))
+	}
+	if m.cursor != 1 {
+		t.Errorf("cursor = %d, want 1", m.cursor)
+	}
+
+	var names []string
+	for _, idx := range m.selIdx {
+		names = append(names, m.items[idx].branch.DisplayName)
+	}
+	want := []string{"main", "bugfix"}
+	for i, w := range want {
+		if names[i] != w {
+			t.Errorf("branch %d = %q, want %q", i, names[i], w)
+		}
+	}
+}
+
+func TestRemoveCurrentLast(t *testing.T) {
+	colorOn = false
+	defer func() { colorOn = false }()
+
+	branches := []Branch{
+		{Name: "main", DisplayName: "main", IsHead: true, ShortHash: "abc1234"},
+		{Name: "feature", DisplayName: "feature", ShortHash: "def5678"},
+	}
+	var items []listItem
+	var selIdx []int
+	for i := range branches {
+		selIdx = append(selIdx, len(items))
+		items = append(items, listItem{branch: &branches[i]})
+	}
+
+	m := tuiModel{
+		allBranches: append([]Branch{}, branches...),
+		items:       items,
+		selIdx:      selIdx,
+		cursor:      1, // last item
+		tw:          80,
+		th:          24,
+	}
+
+	m.removeCurrent()
+
+	if len(m.selIdx) != 1 {
+		t.Fatalf("after remove: %d selectable, want 1", len(m.selIdx))
+	}
+	if m.cursor != 0 {
+		t.Errorf("cursor = %d, want 0", m.cursor)
+	}
+	if m.items[m.selIdx[0]].branch.Name != "main" {
+		t.Errorf("remaining = %q, want 'main'", m.items[m.selIdx[0]].branch.Name)
+	}
+}
+
+func TestViewConfirm(t *testing.T) {
+	colorOn = false
+	defer func() { colorOn = false }()
+
+	items := []listItem{
+		{branch: &Branch{Name: "main", DisplayName: "main", IsHead: true, ShortHash: "abc1234"}},
+		{branch: &Branch{Name: "feature", DisplayName: "feature", ShortHash: "def5678"}},
+	}
+	m := tuiModel{
+		items:      items,
+		selIdx:     []int{0, 1},
+		cursor:     1,
+		confirming: true,
+		tw:         80,
+		th:         10,
+		cw:         colWidths{name: 20, dev: 4, remote: 10, hash: 7},
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "Delete 'feature'? [y/n]") {
+		t.Errorf("view should show delete confirmation, got:\n%s", view)
+	}
+
+	m.confirmForce = true
+	view = m.View()
+	if !strings.Contains(view, "Force delete 'feature'? [y/n]") {
+		t.Errorf("view should show force delete confirmation, got:\n%s", view)
+	}
+}
+
+func TestViewStatus(t *testing.T) {
+	colorOn = false
+	defer func() { colorOn = false }()
+
+	items := []listItem{
+		{branch: &Branch{Name: "main", DisplayName: "main", IsHead: true, ShortHash: "abc1234"}},
+	}
+	m := tuiModel{
+		items:     items,
+		selIdx:    []int{0},
+		statusMsg: "Deleted branch feature (was abc1234).",
+		tw:        80,
+		th:        10,
+		cw:        colWidths{name: 20, dev: 4, remote: 10, hash: 7},
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "Deleted branch feature") {
+		t.Errorf("view should show status, got:\n%s", view)
+	}
+}
+
+func TestStatusClearsOnKey(t *testing.T) {
+	colorOn = false
+	defer func() { colorOn = false }()
+
+	items := []listItem{
+		{branch: &Branch{Name: "main", DisplayName: "main", IsHead: true}},
+		{branch: &Branch{Name: "feature", DisplayName: "feature"}},
+	}
+	m := tuiModel{
+		items:       items,
+		selIdx:      []int{0, 1},
+		cursor:      0,
+		statusMsg:   "some message",
+		statusIsErr: false,
+		tw:          80,
+		th:          24,
+	}
+
+	result, _ := m.updateNormal(runeKey('j'))
+	rm := result.(tuiModel)
+	if rm.statusMsg != "" {
+		t.Errorf("status should be cleared, got %q", rm.statusMsg)
 	}
 }
