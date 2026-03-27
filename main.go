@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -99,18 +101,25 @@ func main() {
 		}
 	}
 
+	// Compute column widths globally so local and remote sections align.
+	cw := computeWidths(branches, tw)
+
+	var buf bytes.Buffer
+
 	sortBranches(local)
-	printBranches(local, tw)
+	printBranches(&buf, local, tw, cw)
 
 	if *showAll && len(remote) > 0 {
 		groups := groupByRemote(remote)
 		for _, g := range groups {
-			fmt.Println()
-			fmt.Println(clr(cBold, fmt.Sprintf("remote/%s:", g.name)))
+			fmt.Fprintln(&buf)
+			fmt.Fprintln(&buf, clr(cBold+cBlue, fmt.Sprintf("remote/%s:", g.name)))
 			sortBranches(g.branches)
-			printBranches(g.branches, tw)
+			printBranches(&buf, g.branches, tw, cw)
 		}
 	}
+
+	pageOutput(buf.Bytes(), tw)
 }
 
 // -------------------------------------------------------------------
@@ -263,46 +272,51 @@ func sortBranches(branches []Branch) {
 // Display
 // -------------------------------------------------------------------
 
-func printBranches(branches []Branch, tw int) {
-	if len(branches) == 0 {
-		return
-	}
+// colWidths holds the computed column widths shared across all sections.
+type colWidths struct {
+	name   int
+	dev    int
+	remote int
+	hash   int
+}
 
-	// Measure columns.
-	maxName, maxDev, maxRemote, maxHash := 0, 0, 0, 0
+func computeWidths(branches []Branch, tw int) colWidths {
+	var cw colWidths
 	for _, b := range branches {
-		if n := runeLen(b.DisplayName); n > maxName {
-			maxName = n
+		if n := runeLen(b.DisplayName); n > cw.name {
+			cw.name = n
 		}
-		if n := runeLen(devPlain(b)); n > maxDev {
-			maxDev = n
+		if n := runeLen(devPlain(b)); n > cw.dev {
+			cw.dev = n
 		}
-		if n := runeLen(remotePlain(b)); n > maxRemote {
-			maxRemote = n
+		if n := runeLen(remotePlain(b)); n > cw.remote {
+			cw.remote = n
 		}
-		if n := runeLen(b.ShortHash); n > maxHash {
-			maxHash = n
+		if n := runeLen(b.ShortHash); n > cw.hash {
+			cw.hash = n
 		}
 	}
 
-	// Cap remote column — the rare different-name case shouldn't blow out the layout.
-	if maxRemote > 20 {
-		maxRemote = 20
+	if cw.remote > 20 {
+		cw.remote = 20
 	}
 
-	// Cap name column so the line still fits.
 	// Layout: indicator(2) + name + gap(1) + dev + gap(1) + remote + gap(1) + hash + gap(1) + tail(>=20)
-	nameCap := tw - 2 - 1 - maxDev - 1 - maxRemote - 1 - maxHash - 1 - 20
+	nameCap := tw - 2 - 1 - cw.dev - 1 - cw.remote - 1 - cw.hash - 1 - 20
 	if nameCap < 20 {
 		nameCap = 20
 	}
 	if nameCap > 50 {
 		nameCap = 50
 	}
-	if maxName > nameCap {
-		maxName = nameCap
+	if cw.name > nameCap {
+		cw.name = nameCap
 	}
 
+	return cw
+}
+
+func printBranches(w io.Writer, branches []Branch, tw int, cw colWidths) {
 	for _, b := range branches {
 		// Indicator.
 		var ind string
@@ -315,49 +329,124 @@ func printBranches(branches []Branch, tw int) {
 			ind = "  "
 		}
 
-		// Name: truncate + pad.
-		name := trunc(b.DisplayName, maxName)
-		namePad := strings.Repeat(" ", maxName-runeLen(name))
-		switch {
-		case b.IsHead:
-			name = clr(cBoldGrn, name+namePad)
-		case b.WorktreePath != "":
-			name = clr(cBoldCyan, name+namePad)
-		default:
-			name = name + namePad
+		if b.IsRemote {
+			// Remote branches: name absorbs the dev + remote columns for alignment.
+			extName := cw.name + 1 + cw.dev + 1 + cw.remote
+			name := trunc(b.DisplayName, extName)
+			name = name + strings.Repeat(" ", extName-runeLen(name))
+
+			hash := b.ShortHash + strings.Repeat(" ", cw.hash-runeLen(b.ShortHash))
+			hash = clr(cYellow, hash)
+
+			used := 2 + extName + 1 + cw.hash + 1
+			subWidth := tw - used
+			if subWidth < 10 {
+				subWidth = 10
+			}
+			subject := trunc(b.Subject, subWidth)
+
+			fmt.Fprintf(w, "%s%s %s %s\n", ind, name, hash, subject)
+		} else {
+			// Local branches: name | deviation | remote | hash | subject [worktree]
+			name := trunc(b.DisplayName, cw.name)
+			namePad := strings.Repeat(" ", cw.name-runeLen(name))
+			switch {
+			case b.IsHead:
+				name = clr(cBoldGrn, name+namePad)
+			case b.WorktreePath != "":
+				name = clr(cBoldCyan, name+namePad)
+			default:
+				name = name + namePad
+			}
+
+			dp := devPlain(b)
+			dc := devColored(b)
+			dPad := strings.Repeat(" ", cw.dev-runeLen(dp))
+
+			rp := trunc(remotePlain(b), cw.remote)
+			rc := remoteColored(b, cw.remote)
+			rPad := strings.Repeat(" ", cw.remote-runeLen(rp))
+
+			hash := b.ShortHash + strings.Repeat(" ", cw.hash-runeLen(b.ShortHash))
+			hash = clr(cYellow, hash)
+
+			var wtTag string
+			var wtPlainLen int
+			if b.WorktreePath != "" {
+				wtTag = " " + clr(cCyan, "["+b.WorktreePath+"]")
+				wtPlainLen = 3 + runeLen(b.WorktreePath)
+			}
+
+			used := 2 + cw.name + 1 + cw.dev + 1 + cw.remote + 1 + cw.hash + 1 + wtPlainLen
+			subWidth := tw - used
+			if subWidth < 10 {
+				subWidth = 10
+			}
+			subject := trunc(b.Subject, subWidth)
+
+			fmt.Fprintf(w, "%s%s %s%s %s%s %s %s%s\n", ind, name, dc, dPad, rc, rPad, hash, subject, wtTag)
 		}
-
-		// Deviation: colored + pad.
-		dp := devPlain(b)
-		dc := devColored(b)
-		dPad := strings.Repeat(" ", maxDev-runeLen(dp))
-
-		// Remote: truncate + colored + pad.
-		rp := trunc(remotePlain(b), maxRemote)
-		rc := remoteColored(b, maxRemote)
-		rPad := strings.Repeat(" ", maxRemote-runeLen(rp))
-
-		// Hash: pad.
-		hash := b.ShortHash + strings.Repeat(" ", maxHash-runeLen(b.ShortHash))
-		hash = clr(cYellow, hash)
-
-		// Tail: commit message, with worktree tag appended for worktree branches.
-		var wtTag string
-		var wtPlainLen int
-		if b.WorktreePath != "" {
-			wtTag = " " + clr(cCyan, "["+b.WorktreePath+"]")
-			wtPlainLen = 3 + runeLen(b.WorktreePath) // " [" + name + "]"
-		}
-
-		used := 2 + maxName + 1 + maxDev + 1 + maxRemote + 1 + maxHash + 1 + wtPlainLen
-		subWidth := tw - used
-		if subWidth < 10 {
-			subWidth = 10
-		}
-		subject := trunc(b.Subject, subWidth)
-
-		fmt.Printf("%s%s %s%s %s%s %s %s%s\n", ind, name, dc, dPad, rc, rPad, hash, subject, wtTag)
 	}
+}
+
+// pageOutput writes data to stdout, using a pager if it exceeds the terminal height.
+// pagerCommand returns the pager command and arguments, following git's
+// precedence: GIT_PAGER > core.pager > PAGER, falling back to "less -RFX".
+// An empty value for GIT_PAGER or PAGER means "no pager" (returns "", nil).
+func pagerCommand() (string, []string) {
+	if p, ok := os.LookupEnv("GIT_PAGER"); ok {
+		if p == "" {
+			return "", nil
+		}
+		return "sh", []string{"-c", p}
+	}
+	if out, err := exec.Command("git", "config", "core.pager").Output(); err == nil {
+		if p := strings.TrimSpace(string(out)); p != "" {
+			return "sh", []string{"-c", p}
+		}
+	}
+	if p, ok := os.LookupEnv("PAGER"); ok {
+		if p == "" {
+			return "", nil
+		}
+		return "sh", []string{"-c", p}
+	}
+	return "less", []string{"-RFX"}
+}
+
+func pageOutput(data []byte, tw int) {
+	if !term.IsTerminal(int(os.Stdout.Fd())) {
+		os.Stdout.Write(data)
+		return
+	}
+
+	_, height, err := term.GetSize(int(os.Stdout.Fd()))
+	lines := bytes.Count(data, []byte{'\n'})
+	if err != nil || lines < height {
+		os.Stdout.Write(data)
+		return
+	}
+
+	name, args := pagerCommand()
+	if name == "" {
+		_, _ = os.Stdout.Write(data)
+		return
+	}
+	cmd := exec.Command(name, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	pipe, err := cmd.StdinPipe()
+	if err != nil {
+		os.Stdout.Write(data)
+		return
+	}
+	if err := cmd.Start(); err != nil {
+		os.Stdout.Write(data)
+		return
+	}
+	pipe.Write(data)
+	pipe.Close()
+	cmd.Wait()
 }
 
 // -------------------------------------------------------------------
