@@ -62,6 +62,8 @@ type Branch struct {
 func main() {
 	showAll := flag.Bool("a", false, "include remote-tracking branches")
 	flag.BoolVar(showAll, "all", false, "include remote-tracking branches")
+	interactive := flag.Bool("i", false, "interactive branch picker (implies -a)")
+	flag.BoolVar(interactive, "interactive", false, "interactive branch picker (implies -a)")
 	noColor := flag.Bool("no-color", false, "disable colored output")
 	showVer := flag.Bool("version", false, "show version")
 	flag.BoolVar(showVer, "v", false, "show version")
@@ -90,7 +92,15 @@ func main() {
 		return
 	}
 
-	tw := getTermWidth()
+	tw, th := getTermSize()
+
+	if *interactive {
+		if err := runInteractive(branches, tw, th); err != nil {
+			fmt.Fprintf(os.Stderr, "gbb: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	var local, remote []Branch
 	for _, b := range branches {
@@ -119,7 +129,7 @@ func main() {
 		}
 	}
 
-	pageOutput(buf.Bytes(), tw)
+	pageOutput(buf.Bytes(), th)
 }
 
 // -------------------------------------------------------------------
@@ -414,15 +424,14 @@ func pagerCommand() (string, []string) {
 	return "less", []string{"-RFX"}
 }
 
-func pageOutput(data []byte, tw int) {
+func pageOutput(data []byte, th int) {
 	if !term.IsTerminal(int(os.Stdout.Fd())) {
 		os.Stdout.Write(data)
 		return
 	}
 
-	_, height, err := term.GetSize(int(os.Stdout.Fd()))
 	lines := bytes.Count(data, []byte{'\n'})
-	if err != nil || lines < height {
+	if lines < th {
 		os.Stdout.Write(data)
 		return
 	}
@@ -551,10 +560,13 @@ func runeLen(s string) int {
 	return len([]rune(s))
 }
 
-func getTermWidth() int {
-	w, _, err := term.GetSize(int(os.Stdout.Fd()))
+func getTermSize() (int, int) {
+	w, h, err := term.GetSize(int(os.Stdout.Fd()))
 	if err != nil || w <= 0 {
-		return 80
+		w = 80
 	}
-	return w
+	if err != nil || h <= 0 {
+		h = 24
+	}
+	return w, h
 }
