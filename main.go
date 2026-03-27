@@ -170,6 +170,11 @@ func loadBranches(includeRemotes bool) ([]Branch, error) {
 		return nil, nil
 	}
 
+	return parseBranches(raw), nil
+}
+
+// parseBranches parses tab-delimited git for-each-ref output into Branch structs.
+func parseBranches(raw string) []Branch {
 	var branches []Branch
 	for _, line := range strings.Split(raw, "\n") {
 		fields := strings.SplitN(line, "\t", 8)
@@ -224,6 +229,7 @@ func loadBranches(includeRemotes bool) ([]Branch, error) {
 		case track != "":
 			for _, part := range strings.Split(track, ", ") {
 				part = strings.TrimSpace(part)
+				// Atoi errors are intentionally ignored — git's format is well-defined.
 				if strings.HasPrefix(part, "ahead ") {
 					b.Ahead, _ = strconv.Atoi(strings.TrimPrefix(part, "ahead "))
 				} else if strings.HasPrefix(part, "behind ") {
@@ -240,7 +246,7 @@ func loadBranches(includeRemotes bool) ([]Branch, error) {
 		branches = append(branches, b)
 	}
 
-	return branches, nil
+	return branches
 }
 
 // -------------------------------------------------------------------
@@ -310,6 +316,10 @@ func computeWidths(branches []Branch, tw int) colWidths {
 	return cw
 }
 
+// printBranches renders branch lines for non-interactive output.
+// The interactive mode uses renderLine (interactive.go) instead, which
+// packs gap spaces inside each column's color span for clean reverse-video
+// selection highlighting. The two paths use intentionally different spacing.
 func printBranches(w io.Writer, branches []Branch, tw int, cw colWidths) {
 	for _, b := range branches {
 		// Indicator.
@@ -469,6 +479,8 @@ func devPlain(b Branch) string {
 }
 
 // devColored returns the deviation indicator with ANSI colors.
+// Used by printBranches (non-interactive). The interactive path uses
+// devColorCode instead to build colored gap spans for reverse-video.
 func devColored(b Branch) string {
 	if b.IsRemote || b.Upstream == "" {
 		return ""
