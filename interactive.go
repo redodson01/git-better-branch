@@ -20,11 +20,18 @@ type listItem struct {
 type tuiModel struct {
 	items  []listItem
 	selIdx []int // indices into items that are selectable (branches only)
-	cursor int   // index into selIdx
-	offset int   // viewport scroll offset (items index)
+	cursor int   // index into the active selection list
+	offset int   // viewport scroll offset
 	tw, th int
 	cw     colWidths
 	chosen *Branch // set on Enter, nil on quit
+
+	// Search state.
+	searching   bool
+	query       string
+	filteredIdx []int // indices into items matching the query
+	savedCursor int   // cursor before entering search
+	savedOffset int   // offset before entering search
 }
 
 func runInteractive(branches []Branch, tw, th int) error {
@@ -116,33 +123,141 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.tw = msg.Width
 		m.th = msg.Height
-
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "q", "esc", "ctrl+c":
-			return m, tea.Quit
-		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
-				m.ensureVisible()
-			}
-		case "down", "j":
-			if m.cursor < len(m.selIdx)-1 {
-				m.cursor++
-				m.ensureVisible()
-			}
-		case "enter":
-			m.chosen = m.items[m.selIdx[m.cursor]].branch
-			return m, tea.Quit
+		if m.searching {
+			return m.updateSearch(msg)
 		}
+		return m.updateNormal(msg)
 	}
-
 	return m, nil
 }
 
+func (m tuiModel) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "esc", "ctrl+c":
+		return m, tea.Quit
+	case "up", "k":
+		if m.cursor > 0 {
+			m.cursor--
+			m.ensureVisible()
+		}
+	case "down", "j":
+		if m.cursor < len(m.selIdx)-1 {
+			m.cursor++
+			m.ensureVisible()
+		}
+	case "enter":
+		m.chosen = m.items[m.selIdx[m.cursor]].branch
+		return m, tea.Quit
+	case "/":
+		m.savedCursor = m.cursor
+		m.savedOffset = m.offset
+		m.searching = true
+		m.query = ""
+		m.filteredIdx = nil
+	}
+	return m, nil
+}
+
+func (m tuiModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.searching = false
+		m.query = ""
+		m.filteredIdx = nil
+		m.cursor = m.savedCursor
+		m.offset = m.savedOffset
+	case "ctrl+c":
+		return m, tea.Quit
+	case "enter":
+		vis := m.visibleSel()
+		if len(vis) > 0 && m.cursor < len(vis) {
+			m.chosen = m.items[vis[m.cursor]].branch
+			return m, tea.Quit
+		}
+	case "up":
+		if m.cursor > 0 {
+			m.cursor--
+			m.ensureVisible()
+		}
+	case "down":
+		vis := m.visibleSel()
+		if len(vis) > 0 && m.cursor < len(vis)-1 {
+			m.cursor++
+			m.ensureVisible()
+		}
+	case "backspace", "ctrl+h":
+		if len(m.query) > 0 {
+			runes := []rune(m.query)
+			m.query = string(runes[:len(runes)-1])
+			m.applyFilter()
+		}
+	default:
+		if len(msg.Runes) > 0 {
+			m.query += string(msg.Runes)
+			m.applyFilter()
+		}
+	}
+	return m, nil
+}
+
+// visibleSel returns the active list of selectable item indices.
+func (m tuiModel) visibleSel() []int {
+	if m.searching && len(m.query) > 0 {
+		return m.filteredIdx
+	}
+	return m.selIdx
+}
+
+func (m *tuiModel) applyFilter() {
+	m.filteredIdx = nil
+	if m.query == "" {
+		m.cursor = 0
+		m.offset = 0
+		return
+	}
+	for _, idx := range m.selIdx {
+		b := m.items[idx].branch
+		if fuzzyMatch(m.query, searchTarget(b)) {
+			m.filteredIdx = append(m.filteredIdx, idx)
+		}
+	}
+	m.cursor = 0
+	m.offset = 0
+}
+
+// --- view ---
+
 func (m tuiModel) View() string {
 	viewH := m.viewHeight()
-	selectedItemIdx := m.selIdx[m.cursor]
+	var lines []string
+
+	if m.searching && len(m.query) > 0 {
+		lines = m.renderFilteredView(viewH)
+	} else {
+		lines = m.renderNormalView(viewH)
+	}
+
+	for len(lines) < viewH {
+		lines = append(lines, "")
+	}
+
+	// Status bar / search prompt.
+	lines = append(lines, "")
+	if m.searching {
+		lines = append(lines, clr(cBold, "/") + m.query + clr(cDim, "▏"))
+	} else {
+		lines = append(lines, clr(cDim, "  ↑/↓ navigate  enter checkout  / search  q quit"))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func (m tuiModel) renderNormalView(viewH int) []string {
+	selectedItemIdx := -1
+	if m.cursor < len(m.selIdx) {
+		selectedItemIdx = m.selIdx[m.cursor]
+	}
 
 	end := m.offset + viewH
 	if end > len(m.items) {
@@ -164,39 +279,68 @@ func (m tuiModel) View() string {
 		}
 
 		if i == selectedItemIdx {
-			// Pad to full width so reverse video spans the entire row.
-			visible := runeLen(stripAnsi(line))
-			if visible < m.tw {
-				line += strings.Repeat(" ", m.tw-visible)
-			}
-			// Apply reverse video, re-enabling after each color reset.
-			line = cReverse + strings.ReplaceAll(line, cReset, cReset+cReverse) + cReset
+			line = applySelection(line, m.tw)
 		}
 
 		lines = append(lines, line)
 	}
+	return lines
+}
 
-	for len(lines) < viewH {
-		lines = append(lines, "")
+func (m tuiModel) renderFilteredView(viewH int) []string {
+	vis := m.filteredIdx
+	end := m.offset + viewH
+	if end > len(vis) {
+		end = len(vis)
 	}
 
-	lines = append(lines, "")
-	lines = append(lines, clr(cDim, "  ↑/↓ navigate  enter checkout  q quit"))
+	var lines []string
+	for i := m.offset; i < end; i++ {
+		b := m.items[vis[i]].branch
+		line := renderLine(b, m.cw, m.tw)
 
-	return strings.Join(lines, "\n")
+		if i == m.cursor {
+			line = applySelection(line, m.tw)
+		}
+
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+func applySelection(line string, tw int) string {
+	visible := runeLen(stripAnsi(line))
+	if visible < tw {
+		line += strings.Repeat(" ", tw-visible)
+	}
+	if !colorOn {
+		return line
+	}
+	return cReverse + strings.ReplaceAll(line, cReset, cReset+cReverse) + cReset
 }
 
 // --- viewport helpers ---
 
 func (m *tuiModel) ensureVisible() {
 	viewH := m.viewHeight()
-	itemIdx := m.selIdx[m.cursor]
 
-	if itemIdx < m.offset {
-		m.offset = itemIdx
-	}
-	if itemIdx >= m.offset+viewH {
-		m.offset = itemIdx - viewH + 1
+	if m.searching && len(m.query) > 0 {
+		// cursor and offset are into filteredIdx.
+		if m.cursor < m.offset {
+			m.offset = m.cursor
+		}
+		if m.cursor >= m.offset+viewH {
+			m.offset = m.cursor - viewH + 1
+		}
+	} else {
+		// Normal mode: offset is into items, cursor is into selIdx.
+		itemIdx := m.selIdx[m.cursor]
+		if itemIdx < m.offset {
+			m.offset = itemIdx
+		}
+		if itemIdx >= m.offset+viewH {
+			m.offset = itemIdx - viewH + 1
+		}
 	}
 }
 
@@ -208,10 +352,34 @@ func (m tuiModel) viewHeight() int {
 	return h
 }
 
+// --- fuzzy search ---
+
+func fuzzyMatch(query, target string) bool {
+	q := []rune(strings.ToLower(query))
+	t := strings.ToLower(target)
+	qi := 0
+	for _, r := range t {
+		if qi < len(q) && r == q[qi] {
+			qi++
+		}
+	}
+	return qi == len(q)
+}
+
+func searchTarget(b *Branch) string {
+	s := b.DisplayName
+	if b.IsRemote {
+		s += " " + b.RemoteName
+	} else if b.Upstream != "" {
+		s += " " + trackRef(*b)
+	}
+	return s
+}
+
 // --- line rendering (with colored gaps for clean reverse-video) ---
 
-// renderLine produces a branch line where each column's trailing gap space
-// is inside that column's color span. This ensures reverse video shows a
+// renderLine produces a branch line where each column's gap spaces
+// are inside that column's color span. This ensures reverse video shows a
 // continuous colored background instead of gray patches between columns.
 func renderLine(b *Branch, cw colWidths, tw int) string {
 	if b.IsRemote {
@@ -223,10 +391,6 @@ func renderLine(b *Branch, cw colWidths, tw int) string {
 func renderLocalLine(b *Branch, cw colWidths, tw int) string {
 	// Each column has a leading and trailing space in its own color,
 	// producing 2 colored spaces between adjacent columns.
-	//
-	// Layout: ind(2) | name+trail(cw.name+1) | lead+dev+trail(1+cw.dev+1) |
-	//         lead+remote+trail(1+cw.remote+1) | lead+hash+trail(1+cw.hash+1) |
-	//         lead+subject(1+...)
 
 	// Indicator: trailing space inside color span.
 	var ind string
@@ -328,7 +492,7 @@ func devColorCode(b Branch) string {
 	}
 	switch {
 	case b.Ahead == 0 && b.Behind == 0:
-		return "" // synced — no color
+		return ""
 	case b.Ahead > 0 && b.Behind == 0:
 		return cGreen
 	case b.Ahead == 0 && b.Behind > 0:
