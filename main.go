@@ -367,7 +367,7 @@ func printBranches(w io.Writer, branches []Branch, tw int, cw colWidths) {
 		}
 		subject := trunc(b.Subject, subWidth)
 
-		fmt.Fprintf(w, "%s%s %s%s %s%s %s %s%s\n", ind, name, dc, dPad, rc, rPad, hash, subject, wtTag)
+		_, _ = fmt.Fprintf(w, "%s%s %s%s %s%s %s %s%s\n", ind, name, dc, dPad, rc, rPad, hash, subject, wtTag)
 	}
 }
 
@@ -398,13 +398,13 @@ func pagerCommand() (string, []string) {
 
 func pageOutput(data []byte, th int) {
 	if !term.IsTerminal(int(os.Stdout.Fd())) {
-		os.Stdout.Write(data)
+		_, _ = os.Stdout.Write(data)
 		return
 	}
 
 	lines := bytes.Count(data, []byte{'\n'})
 	if lines < th {
-		os.Stdout.Write(data)
+		_, _ = os.Stdout.Write(data)
 		return
 	}
 
@@ -418,16 +418,16 @@ func pageOutput(data []byte, th int) {
 	cmd.Stderr = os.Stderr
 	pipe, err := cmd.StdinPipe()
 	if err != nil {
-		os.Stdout.Write(data)
+		_, _ = os.Stdout.Write(data)
 		return
 	}
 	if err := cmd.Start(); err != nil {
-		os.Stdout.Write(data)
+		_, _ = os.Stdout.Write(data)
 		return
 	}
-	pipe.Write(data)
-	pipe.Close()
-	cmd.Wait()
+	_, _ = pipe.Write(data)
+	_ = pipe.Close()
+	_ = cmd.Wait()
 }
 
 // -------------------------------------------------------------------

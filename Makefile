@@ -10,7 +10,13 @@ install: build
 uninstall:
 	rm -f $(PREFIX)/bin/git-better-branch
 
+test:
+	go test ./...
+
+lint:
+	golangci-lint run
+
 clean:
 	rm -f git-better-branch
 
-.PHONY: build install uninstall clean
+.PHONY: build install uninstall test lint clean
