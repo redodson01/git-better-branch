@@ -23,6 +23,7 @@ const (
 	cRed      = "\033[31m"
 	cGreen    = "\033[32m"
 	cYellow   = "\033[33m"
+	cBlue     = "\033[34m"
 	cCyan     = "\033[36m"
 	cBoldGrn  = "\033[1;32m"
 	cBoldCyan = "\033[1;36m"
@@ -268,22 +269,30 @@ func printBranches(branches []Branch, tw int) {
 	}
 
 	// Measure columns.
-	maxName, maxHash, maxTrack := 0, 0, 0
+	maxName, maxDev, maxRemote, maxHash := 0, 0, 0, 0
 	for _, b := range branches {
 		if n := runeLen(b.DisplayName); n > maxName {
 			maxName = n
 		}
+		if n := runeLen(devPlain(b)); n > maxDev {
+			maxDev = n
+		}
+		if n := runeLen(remotePlain(b)); n > maxRemote {
+			maxRemote = n
+		}
 		if n := runeLen(b.ShortHash); n > maxHash {
 			maxHash = n
 		}
-		if n := runeLen(trackPlain(b)); n > maxTrack {
-			maxTrack = n
-		}
+	}
+
+	// Cap remote column — the rare different-name case shouldn't blow out the layout.
+	if maxRemote > 20 {
+		maxRemote = 20
 	}
 
 	// Cap name column so the line still fits.
-	// Layout: indicator(2) + name + gap(2) + hash + gap(1) + track + gap(2) + subject(>=20)
-	nameCap := tw - 2 - 2 - maxHash - 1 - maxTrack - 2 - 20
+	// Layout: indicator(2) + name + gap(1) + dev + gap(1) + remote + gap(1) + hash + gap(1) + tail(>=20)
+	nameCap := tw - 2 - 1 - maxDev - 1 - maxRemote - 1 - maxHash - 1 - 20
 	if nameCap < 20 {
 		nameCap = 20
 	}
@@ -292,9 +301,6 @@ func printBranches(branches []Branch, tw int) {
 	}
 	if maxName > nameCap {
 		maxName = nameCap
-	}
-	if maxTrack > 16 {
-		maxTrack = 16
 	}
 
 	for _, b := range branches {
@@ -321,16 +327,21 @@ func printBranches(branches []Branch, tw int) {
 			name = name + namePad
 		}
 
+		// Deviation: colored + pad.
+		dp := devPlain(b)
+		dc := devColored(b)
+		dPad := strings.Repeat(" ", maxDev-runeLen(dp))
+
+		// Remote: truncate + colored + pad.
+		rp := trunc(remotePlain(b), maxRemote)
+		rc := remoteColored(b, maxRemote)
+		rPad := strings.Repeat(" ", maxRemote-runeLen(rp))
+
 		// Hash: pad.
 		hash := b.ShortHash + strings.Repeat(" ", maxHash-runeLen(b.ShortHash))
-		hash = clr(cDim, hash)
+		hash = clr(cYellow, hash)
 
-		// Tracking: colored + pad.
-		tp := trackPlain(b)
-		tc := trackColored(b)
-		tPad := strings.Repeat(" ", maxTrack-runeLen(tp))
-
-		// Worktree tag (appended after subject).
+		// Tail: commit message, with worktree tag appended for worktree branches.
 		var wtTag string
 		var wtPlainLen int
 		if b.WorktreePath != "" {
@@ -338,17 +349,20 @@ func printBranches(branches []Branch, tw int) {
 			wtPlainLen = 3 + runeLen(b.WorktreePath) // " [" + name + "]"
 		}
 
-		// Subject: fill remaining width.
-		used := 2 + maxName + 2 + maxHash + 1 + maxTrack + 2 + wtPlainLen
+		used := 2 + maxName + 1 + maxDev + 1 + maxRemote + 1 + maxHash + 1 + wtPlainLen
 		subWidth := tw - used
 		if subWidth < 10 {
 			subWidth = 10
 		}
 		subject := trunc(b.Subject, subWidth)
 
-		fmt.Printf("%s%s  %s %s%s  %s%s\n", ind, name, hash, tc, tPad, subject, wtTag)
+		fmt.Printf("%s%s %s%s %s%s %s %s%s\n", ind, name, dc, dPad, rc, rPad, hash, subject, wtTag)
 	}
 }
+
+// -------------------------------------------------------------------
+// Deviation + Remote display
+// -------------------------------------------------------------------
 
 // trackRef returns the remote display string: just the remote name if the
 // upstream branch matches the local name, or the full upstream ref if they differ.
@@ -364,52 +378,66 @@ func trackRef(b Branch) string {
 	return b.Upstream
 }
 
-// trackPlain returns the tracking status as plain text (for width measurement).
-func trackPlain(b Branch) string {
-	if b.IsRemote {
+// devPlain returns the deviation indicator as plain text (for width measurement).
+func devPlain(b Branch) string {
+	if b.IsRemote || b.Upstream == "" {
 		return ""
 	}
 	if b.Gone {
 		return "gone"
 	}
-	if b.Upstream == "" {
-		return "local"
-	}
-	r := trackRef(b)
 	switch {
 	case b.Ahead == 0 && b.Behind == 0:
-		return "= " + r
+		return ""
 	case b.Ahead > 0 && b.Behind == 0:
-		return fmt.Sprintf("↑%d %s", b.Ahead, r)
+		return fmt.Sprintf("↑%d", b.Ahead)
 	case b.Ahead == 0 && b.Behind > 0:
-		return fmt.Sprintf("↓%d %s", b.Behind, r)
+		return fmt.Sprintf("↓%d", b.Behind)
 	default:
-		return fmt.Sprintf("↑%d↓%d %s", b.Ahead, b.Behind, r)
+		return fmt.Sprintf("↑%d↓%d", b.Ahead, b.Behind)
 	}
 }
 
-// trackColored returns the tracking status with ANSI colors.
-func trackColored(b Branch) string {
-	if b.IsRemote {
+// devColored returns the deviation indicator with ANSI colors.
+func devColored(b Branch) string {
+	if b.IsRemote || b.Upstream == "" {
 		return ""
 	}
 	if b.Gone {
 		return clr(cBoldRed, "gone")
 	}
+	switch {
+	case b.Ahead == 0 && b.Behind == 0:
+		return ""
+	case b.Ahead > 0 && b.Behind == 0:
+		return clr(cGreen, fmt.Sprintf("↑%d", b.Ahead))
+	case b.Ahead == 0 && b.Behind > 0:
+		return clr(cYellow, fmt.Sprintf("↓%d", b.Behind))
+	default:
+		return clr(cBoldRed, fmt.Sprintf("↑%d↓%d", b.Ahead, b.Behind))
+	}
+}
+
+// remotePlain returns the remote/tracking ref as plain text (for width measurement).
+func remotePlain(b Branch) string {
+	if b.IsRemote {
+		return ""
+	}
+	if b.Upstream == "" {
+		return "local"
+	}
+	return trackRef(b)
+}
+
+// remoteColored returns the remote/tracking ref with ANSI colors, truncated to maxWidth.
+func remoteColored(b Branch, maxWidth int) string {
+	if b.IsRemote {
+		return ""
+	}
 	if b.Upstream == "" {
 		return clr(cDim, "local")
 	}
-	r := trackRef(b)
-	switch {
-	case b.Ahead == 0 && b.Behind == 0:
-		return clr(cGreen, "= "+r)
-	case b.Ahead > 0 && b.Behind == 0:
-		return clr(cGreen, fmt.Sprintf("↑%d %s", b.Ahead, r))
-	case b.Ahead == 0 && b.Behind > 0:
-		return clr(cYellow, fmt.Sprintf("↓%d %s", b.Behind, r))
-	default:
-		return clr(cBoldRed, fmt.Sprintf("↑%d↓%d %s", b.Ahead, b.Behind, r))
-	}
+	return clr(cBlue, trunc(trackRef(b), maxWidth))
 }
 
 // -------------------------------------------------------------------
