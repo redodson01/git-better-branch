@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -15,6 +16,9 @@ func TestTrunc(t *testing.T) {
 		{"hello", 5, "hello"},
 		{"hello", 4, "hel…"},
 		{"hello", 1, "…"},
+		{"テスト", 6, "テスト"},   // 3 CJK chars = 6 columns, fits exactly
+		{"テスト", 5, "テス…"},   // 2 CJK chars (4 cols) + ellipsis (1 col) = 5
+		{"テスト", 2, "…"},      // only room for ellipsis
 		{"", 5, ""},
 		{"abc", 3, "abc"},
 		{"abcd", 3, "ab…"},
@@ -38,6 +42,8 @@ func TestRuneLen(t *testing.T) {
 		{"", 0},
 		{"↑3↓2", 4},
 		{"…", 1},
+		{"テスト", 6},    // 3 CJK chars = 6 display columns
+		{"aテストb", 8}, // 1 + 6 + 1 = 8
 	}
 	for _, tt := range tests {
 		got := runeLen(tt.s)
@@ -317,5 +323,135 @@ func TestRemoteColored(t *testing.T) {
 		if plain != tt.wantSub {
 			t.Errorf("remoteColored(%s) plain = %q, want %q", tt.name, plain, tt.wantSub)
 		}
+	}
+}
+
+func TestPrintBranches(t *testing.T) {
+	colorOn = false
+	defer func() { colorOn = false }()
+
+	branches := []Branch{
+		{Name: "main", DisplayName: "main", ShortHash: "abc1234", Upstream: "origin/main", UpstreamRemote: "origin", IsHead: true, Subject: "Initial commit"},
+		{Name: "feature", DisplayName: "feature", ShortHash: "def5678", Upstream: "origin/feature", UpstreamRemote: "origin", Ahead: 2, Subject: "Add feature"},
+		{DisplayName: "dev", ShortHash: "ghi9012", IsRemote: true, RemoteName: "origin", Subject: "Remote dev"},
+	}
+	cw := computeWidths(branches, 100)
+
+	var buf bytes.Buffer
+	printBranches(&buf, branches, 100, cw)
+	out := buf.String()
+
+	// Each branch produces one line.
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("printBranches produced %d lines, want 3", len(lines))
+	}
+
+	// HEAD branch has * indicator and branch name.
+	if !strings.Contains(lines[0], "*") || !strings.Contains(lines[0], "main") {
+		t.Errorf("line 0: expected HEAD indicator and 'main', got %q", lines[0])
+	}
+
+	// Ahead branch shows deviation.
+	if !strings.Contains(lines[1], "↑2") {
+		t.Errorf("line 1: expected '↑2', got %q", lines[1])
+	}
+
+	// Remote branch shows remote name.
+	if !strings.Contains(lines[2], "origin") || !strings.Contains(lines[2], "dev") {
+		t.Errorf("line 2: expected remote 'origin' and 'dev', got %q", lines[2])
+	}
+}
+
+func TestRenderLine(t *testing.T) {
+	colorOn = false
+	defer func() { colorOn = false }()
+
+	cw := colWidths{name: 20, dev: 4, remote: 10, hash: 7}
+
+	// Local branch.
+	b := &Branch{Name: "main", DisplayName: "main", ShortHash: "abc1234", Upstream: "origin/main", UpstreamRemote: "origin", IsHead: true, Subject: "Initial commit"}
+	line := renderLine(b, cw, 80)
+	plain := stripAnsi(line)
+	if !strings.Contains(plain, "main") || !strings.Contains(plain, "abc1234") || !strings.Contains(plain, "origin") {
+		t.Errorf("renderLine local: missing expected content in %q", plain)
+	}
+
+	// Remote branch.
+	rb := &Branch{DisplayName: "feature", ShortHash: "def5678", IsRemote: true, RemoteName: "origin", Subject: "Remote feature"}
+	rline := renderLine(rb, cw, 80)
+	rplain := stripAnsi(rline)
+	if !strings.Contains(rplain, "feature") || !strings.Contains(rplain, "origin") {
+		t.Errorf("renderLine remote: missing expected content in %q", rplain)
+	}
+}
+
+func TestSearchTarget(t *testing.T) {
+	tests := []struct {
+		name string
+		b    Branch
+		want string
+	}{
+		{"local with upstream", Branch{DisplayName: "main", Upstream: "origin/main", UpstreamRemote: "origin", Name: "main"}, "main origin"},
+		{"local diff upstream", Branch{DisplayName: "dev", Upstream: "origin/staging", UpstreamRemote: "origin", Name: "dev"}, "dev origin/staging"},
+		{"local no upstream", Branch{DisplayName: "local-only"}, "local-only"},
+		{"remote", Branch{DisplayName: "feature", IsRemote: true, RemoteName: "origin"}, "feature origin"},
+	}
+	for _, tt := range tests {
+		got := searchTarget(&tt.b)
+		if got != tt.want {
+			t.Errorf("searchTarget(%s) = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestDevColorCode(t *testing.T) {
+	tests := []struct {
+		name string
+		b    Branch
+		want string
+	}{
+		{"remote", Branch{IsRemote: true}, ""},
+		{"no upstream", Branch{}, ""},
+		{"synced", Branch{Upstream: "origin/main"}, ""},
+		{"ahead", Branch{Upstream: "origin/main", Ahead: 1}, cGreen},
+		{"behind", Branch{Upstream: "origin/main", Behind: 2}, cYellow},
+		{"diverged", Branch{Upstream: "origin/main", Ahead: 1, Behind: 2}, cBoldRed},
+		{"gone", Branch{Upstream: "origin/main", Gone: true}, cBoldRed},
+	}
+	for _, tt := range tests {
+		got := devColorCode(tt.b)
+		if got != tt.want {
+			t.Errorf("devColorCode(%s) = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestApplySelection(t *testing.T) {
+	colorOn = true
+	defer func() { colorOn = false }()
+
+	line := "  hello world"
+	result := applySelection(line, 20)
+
+	// Should contain reverse video code.
+	if !strings.Contains(result, cReverse) {
+		t.Error("applySelection: missing reverse video code")
+	}
+	// Plain text content should be preserved.
+	if !strings.Contains(stripAnsi(result), "hello world") {
+		t.Error("applySelection: content lost")
+	}
+	// Should be padded to terminal width.
+	plain := stripAnsi(result)
+	if runeLen(plain) != 20 {
+		t.Errorf("applySelection: width = %d, want 20", runeLen(plain))
+	}
+
+	// With colorOn = false, no ANSI codes should be emitted.
+	colorOn = false
+	noColor := applySelection(line, 20)
+	if strings.Contains(noColor, "\033") {
+		t.Error("applySelection with colorOn=false: should not contain ANSI codes")
 	}
 }

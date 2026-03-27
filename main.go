@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/mattn/go-runewidth"
 	"golang.org/x/term"
 )
 
@@ -32,6 +33,8 @@ const (
 	cBoldRed  = "\033[1;31m"
 )
 
+// colorOn is set once in main() before any output. Tests may mutate it
+// directly but must not run in parallel (no t.Parallel).
 var colorOn bool
 
 func clr(code, text string) string {
@@ -252,7 +255,6 @@ func parseBranches(raw string) []Branch {
 // -------------------------------------------------------------------
 // Grouping and sorting
 // -------------------------------------------------------------------
-
 
 func sortBranches(branches []Branch) {
 	sort.SliceStable(branches, func(i, j int) bool {
@@ -526,22 +528,34 @@ func remoteColored(b Branch, maxWidth int) string {
 // Utilities
 // -------------------------------------------------------------------
 
+// trunc truncates s to fit within max terminal columns, appending "…" if needed.
+// Uses display width (not rune count) so CJK/wide characters are handled correctly.
 func trunc(s string, max int) string {
 	if max <= 0 {
 		return ""
 	}
-	runes := []rune(s)
-	if len(runes) <= max {
+	if runewidth.StringWidth(s) <= max {
 		return s
 	}
 	if max == 1 {
 		return "…"
 	}
-	return string(runes[:max-1]) + "…"
+	target := max - 1 // reserve 1 column for "…"
+	w := 0
+	for i, r := range s {
+		rw := runewidth.RuneWidth(r)
+		if w+rw > target {
+			return s[:i] + "…"
+		}
+		w += rw
+	}
+	return s
 }
 
+// runeLen returns the display width of s in terminal columns.
+// CJK/wide characters count as 2 columns.
 func runeLen(s string) int {
-	return len([]rune(s))
+	return runewidth.StringWidth(s)
 }
 
 func getTermSize() (int, int) {

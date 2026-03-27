@@ -6,13 +6,14 @@ Thanks for your interest in contributing to git-better-branch!
 
 1. Fork and clone the repository
 2. Make sure you have Go 1.26+ installed
-3. Run `make build` to verify everything compiles
+3. Install [golangci-lint](https://golangci-lint.run/welcome/install/) (e.g., `brew install golangci-lint`)
+4. Run `make build` to verify everything compiles
 
 ## Making changes
 
 1. Create a branch for your change
 2. Make your changes
-3. Run `make build` to verify it compiles
+3. Run `make test` and `make lint` to verify
 4. Test manually against a repository with a variety of branches, remotes, and worktrees
 5. Submit a pull request
 

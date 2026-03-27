@@ -17,13 +17,14 @@ type listItem struct {
 }
 
 type tuiModel struct {
-	items  []listItem
-	selIdx []int // indices into items that are selectable (branches only)
-	cursor int   // index into the active selection list
-	offset int   // viewport scroll offset
-	tw, th int
-	cw     colWidths
-	chosen *Branch // set on Enter, nil on quit
+	allBranches []Branch // kept for recomputing column widths on resize
+	items       []listItem
+	selIdx      []int // indices into items that are selectable (branches only)
+	cursor      int   // index into the active selection list
+	offset      int   // viewport scroll offset
+	tw, th      int
+	cw          colWidths
+	chosen      *Branch // set on Enter, nil on quit
 
 	// Search state.
 	searching   bool
@@ -68,11 +69,12 @@ func runInteractive(branches []Branch, tw, th int) error {
 	}
 
 	m := tuiModel{
-		items:  items,
-		selIdx: selIdx,
-		tw:     tw,
-		th:     th,
-		cw:     cw,
+		allBranches: branches,
+		items:       items,
+		selIdx:      selIdx,
+		tw:          tw,
+		th:          th,
+		cw:          cw,
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
@@ -117,6 +119,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.tw = msg.Width
 		m.th = msg.Height
+		m.cw = computeWidths(m.allBranches, m.tw)
 	case tea.KeyMsg:
 		if m.searching {
 			return m.updateSearch(msg)
@@ -454,7 +457,6 @@ func renderLine(b *Branch, cw colWidths, tw int) string {
 
 	return ind + name + dev + rem + hash + subject
 }
-
 
 // devColorCode returns just the ANSI color code for the deviation state.
 func devColorCode(b Branch) string {
