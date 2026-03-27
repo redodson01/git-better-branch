@@ -120,13 +120,9 @@ func main() {
 	printBranches(&buf, local, tw, cw)
 
 	if *showAll && len(remote) > 0 {
-		groups := groupByRemote(remote)
-		for _, g := range groups {
-			fmt.Fprintln(&buf)
-			fmt.Fprintln(&buf, clr(cBold+cBlue, fmt.Sprintf("remote/%s:", g.name)))
-			sortBranches(g.branches)
-			printBranches(&buf, g.branches, tw, cw)
-		}
+		fmt.Fprintln(&buf)
+		sortBranches(remote)
+		printBranches(&buf, remote, tw, cw)
 	}
 
 	pageOutput(buf.Bytes(), th)
@@ -243,26 +239,6 @@ func loadBranches(includeRemotes bool) ([]Branch, error) {
 // Grouping and sorting
 // -------------------------------------------------------------------
 
-type remoteGroup struct {
-	name     string
-	branches []Branch
-}
-
-func groupByRemote(branches []Branch) []remoteGroup {
-	m := make(map[string][]Branch)
-	var order []string
-	for _, b := range branches {
-		if _, exists := m[b.RemoteName]; !exists {
-			order = append(order, b.RemoteName)
-		}
-		m[b.RemoteName] = append(m[b.RemoteName], b)
-	}
-	groups := make([]remoteGroup, 0, len(order))
-	for _, name := range order {
-		groups = append(groups, remoteGroup{name: name, branches: m[name]})
-	}
-	return groups
-}
 
 func sortBranches(branches []Branch) {
 	sort.SliceStable(branches, func(i, j int) bool {
@@ -335,67 +311,55 @@ func printBranches(w io.Writer, branches []Branch, tw int, cw colWidths) {
 			ind = clr(cBoldGrn, "*") + " "
 		case b.WorktreePath != "":
 			ind = clr(cBoldCyan, "+") + " "
+		case b.IsRemote:
+			ind = clr(cRed, "  ")
 		default:
 			ind = "  "
 		}
 
-		if b.IsRemote {
-			// Remote branches: name absorbs the dev + remote columns for alignment.
-			extName := cw.name + 1 + cw.dev + 1 + cw.remote
-			name := trunc(b.DisplayName, extName)
-			name = name + strings.Repeat(" ", extName-runeLen(name))
-
-			hash := b.ShortHash + strings.Repeat(" ", cw.hash-runeLen(b.ShortHash))
-			hash = clr(cYellow, hash)
-
-			used := 2 + extName + 1 + cw.hash + 1
-			subWidth := tw - used
-			if subWidth < 10 {
-				subWidth = 10
-			}
-			subject := trunc(b.Subject, subWidth)
-
-			fmt.Fprintf(w, "%s%s %s %s\n", ind, name, hash, subject)
-		} else {
-			// Local branches: name | deviation | remote | hash | subject [worktree]
-			name := trunc(b.DisplayName, cw.name)
-			namePad := strings.Repeat(" ", cw.name-runeLen(name))
-			switch {
-			case b.IsHead:
-				name = clr(cBoldGrn, name+namePad)
-			case b.WorktreePath != "":
-				name = clr(cBoldCyan, name+namePad)
-			default:
-				name = name + namePad
-			}
-
-			dp := devPlain(b)
-			dc := devColored(b)
-			dPad := strings.Repeat(" ", cw.dev-runeLen(dp))
-
-			rp := trunc(remotePlain(b), cw.remote)
-			rc := remoteColored(b, cw.remote)
-			rPad := strings.Repeat(" ", cw.remote-runeLen(rp))
-
-			hash := b.ShortHash + strings.Repeat(" ", cw.hash-runeLen(b.ShortHash))
-			hash = clr(cYellow, hash)
-
-			var wtTag string
-			var wtPlainLen int
-			if b.WorktreePath != "" {
-				wtTag = " " + clr(cCyan, "["+b.WorktreePath+"]")
-				wtPlainLen = 3 + runeLen(b.WorktreePath)
-			}
-
-			used := 2 + cw.name + 1 + cw.dev + 1 + cw.remote + 1 + cw.hash + 1 + wtPlainLen
-			subWidth := tw - used
-			if subWidth < 10 {
-				subWidth = 10
-			}
-			subject := trunc(b.Subject, subWidth)
-
-			fmt.Fprintf(w, "%s%s %s%s %s%s %s %s%s\n", ind, name, dc, dPad, rc, rPad, hash, subject, wtTag)
+		// Name.
+		name := trunc(b.DisplayName, cw.name)
+		namePad := strings.Repeat(" ", cw.name-runeLen(name))
+		switch {
+		case b.IsHead:
+			name = clr(cBoldGrn, name+namePad)
+		case b.WorktreePath != "":
+			name = clr(cBoldCyan, name+namePad)
+		case b.IsRemote:
+			name = clr(cRed, name+namePad)
+		default:
+			name = name + namePad
 		}
+
+		dp := devPlain(b)
+		dc := devColored(b)
+		dPad := strings.Repeat(" ", cw.dev-runeLen(dp))
+		if b.IsRemote && dc == "" {
+			dPad = clr(cRed, dPad)
+		}
+
+		rp := trunc(remotePlain(b), cw.remote)
+		rc := remoteColored(b, cw.remote)
+		rPad := strings.Repeat(" ", cw.remote-runeLen(rp))
+
+		hash := b.ShortHash + strings.Repeat(" ", cw.hash-runeLen(b.ShortHash))
+		hash = clr(cYellow, hash)
+
+		var wtTag string
+		var wtPlainLen int
+		if b.WorktreePath != "" {
+			wtTag = " " + clr(cCyan, "["+b.WorktreePath+"]")
+			wtPlainLen = 3 + runeLen(b.WorktreePath)
+		}
+
+		used := 2 + cw.name + 1 + cw.dev + 1 + cw.remote + 1 + cw.hash + 1 + wtPlainLen
+		subWidth := tw - used
+		if subWidth < 10 {
+			subWidth = 10
+		}
+		subject := trunc(b.Subject, subWidth)
+
+		fmt.Fprintf(w, "%s%s %s%s %s%s %s %s%s\n", ind, name, dc, dPad, rc, rPad, hash, subject, wtTag)
 	}
 }
 
@@ -519,7 +483,7 @@ func devColored(b Branch) string {
 // remotePlain returns the remote/tracking ref as plain text (for width measurement).
 func remotePlain(b Branch) string {
 	if b.IsRemote {
-		return ""
+		return b.RemoteName
 	}
 	if b.Upstream == "" {
 		return "local"
@@ -530,7 +494,7 @@ func remotePlain(b Branch) string {
 // remoteColored returns the remote/tracking ref with ANSI colors, truncated to maxWidth.
 func remoteColored(b Branch, maxWidth int) string {
 	if b.IsRemote {
-		return ""
+		return clr(cRed, trunc(b.RemoteName, maxWidth))
 	}
 	if b.Upstream == "" {
 		return clr(cDim, "local")

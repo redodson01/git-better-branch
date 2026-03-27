@@ -56,16 +56,11 @@ func runInteractive(branches []Branch, tw, th int) error {
 	}
 
 	if len(remote) > 0 {
-		groups := groupByRemote(remote)
-		for gi := range groups {
-			g := &groups[gi]
-			items = append(items, listItem{blank: true})
-			items = append(items, listItem{header: fmt.Sprintf("remote/%s:", g.name)})
-			sortBranches(g.branches)
-			for i := range g.branches {
-				selIdx = append(selIdx, len(items))
-				items = append(items, listItem{branch: &g.branches[i]})
-			}
+		items = append(items, listItem{blank: true})
+		sortBranches(remote)
+		for i := range remote {
+			selIdx = append(selIdx, len(items))
+			items = append(items, listItem{branch: &remote[i]})
 		}
 	}
 
@@ -382,13 +377,6 @@ func searchTarget(b *Branch) string {
 // are inside that column's color span. This ensures reverse video shows a
 // continuous colored background instead of gray patches between columns.
 func renderLine(b *Branch, cw colWidths, tw int) string {
-	if b.IsRemote {
-		return renderRemoteLine(b, cw, tw)
-	}
-	return renderLocalLine(b, cw, tw)
-}
-
-func renderLocalLine(b *Branch, cw colWidths, tw int) string {
 	// Each column has a leading and trailing space in its own color,
 	// producing 2 colored spaces between adjacent columns.
 
@@ -399,6 +387,8 @@ func renderLocalLine(b *Branch, cw colWidths, tw int) string {
 		ind = clr(cBoldGrn, "* ")
 	case b.WorktreePath != "":
 		ind = clr(cBoldCyan, "+ ")
+	case b.IsRemote:
+		ind = clr(cRed, "  ")
 	default:
 		ind = "  "
 	}
@@ -412,6 +402,8 @@ func renderLocalLine(b *Branch, cw colWidths, tw int) string {
 		name = clr(cBoldGrn, nameText+nameTrail)
 	case b.WorktreePath != "":
 		name = clr(cBoldCyan, nameText+nameTrail)
+	case b.IsRemote:
+		name = clr(cRed, nameText+nameTrail)
 	default:
 		name = nameText + nameTrail
 	}
@@ -422,6 +414,12 @@ func renderLocalLine(b *Branch, cw colWidths, tw int) string {
 	var dev string
 	if dc := devColorCode(*b); dc != "" {
 		dev = clr(dc, devBody)
+	} else if b.IsRemote {
+		dev = clr(cRed, devBody)
+	} else if b.IsHead {
+		dev = clr(cBoldGrn, devBody)
+	} else if b.WorktreePath != "" {
+		dev = clr(cBoldCyan, devBody)
 	} else {
 		dev = devBody
 	}
@@ -430,7 +428,9 @@ func renderLocalLine(b *Branch, cw colWidths, tw int) string {
 	rp := trunc(remotePlain(*b), cw.remote)
 	remBody := " " + rp + strings.Repeat(" ", cw.remote-runeLen(rp)+1)
 	var rem string
-	if b.Upstream == "" {
+	if b.IsRemote {
+		rem = clr(cRed, remBody)
+	} else if b.Upstream == "" {
 		rem = clr(cDim, remBody)
 	} else {
 		rem = clr(cBlue, remBody)
@@ -458,29 +458,6 @@ func renderLocalLine(b *Branch, cw colWidths, tw int) string {
 	return ind + name + dev + rem + hash + subject
 }
 
-func renderRemoteLine(b *Branch, cw colWidths, tw int) string {
-	ind := "  "
-
-	// Remote name absorbs the name+dev+remote columns (including their extra gaps).
-	extName := cw.name + 1 + (1 + cw.dev + 1) + (1 + cw.remote)
-	nameText := trunc(b.DisplayName, extName)
-	nameTrail := strings.Repeat(" ", extName-runeLen(nameText)+1)
-	name := nameText + nameTrail
-
-	// Hash: leading space + content + pad + trailing space, in yellow.
-	hashBody := " " + b.ShortHash + strings.Repeat(" ", cw.hash-runeLen(b.ShortHash)+1)
-	hash := clr(cYellow, hashBody)
-
-	// Subject: leading space + content.
-	used := 2 + (extName + 1) + (1 + cw.hash + 1) + 1
-	subWidth := tw - used
-	if subWidth < 10 {
-		subWidth = 10
-	}
-	subject := " " + trunc(b.Subject, subWidth)
-
-	return ind + name + hash + subject
-}
 
 // devColorCode returns just the ANSI color code for the deviation state.
 func devColorCode(b Branch) string {
