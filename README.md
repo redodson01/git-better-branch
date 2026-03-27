@@ -1,5 +1,7 @@
 # git-better-branch
 
+[![CI](https://github.com/redodson01/git-better-branch/actions/workflows/ci.yml/badge.svg)](https://github.com/redodson01/git-better-branch/actions/workflows/ci.yml)
+
 A better `git branch` viewer for repositories with long branch names, worktrees, and many remotes.
 
 ## The problem
