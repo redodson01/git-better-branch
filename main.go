@@ -62,14 +62,22 @@ type Branch struct {
 func main() {
 	showAll := flag.Bool("a", false, "include remote-tracking branches")
 	flag.BoolVar(showAll, "all", false, "include remote-tracking branches")
-	interactive := flag.Bool("i", false, "interactive branch picker (implies -a)")
-	flag.BoolVar(interactive, "interactive", false, "interactive branch picker (implies -a)")
+	interactive := flag.Bool("i", false, "interactive branch picker")
+	flag.BoolVar(interactive, "interactive", false, "interactive branch picker")
 	noColor := flag.Bool("no-color", false, "disable colored output")
 	showVer := flag.Bool("version", false, "show version")
 	flag.BoolVar(showVer, "v", false, "show version")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: git better-branch [flags]\n\nA better git branch viewer.\n\nFlags:\n")
-		flag.PrintDefaults()
+		fmt.Fprintf(os.Stderr, `Usage: git better-branch [flags]
+
+A better git branch viewer.
+
+Flags:
+  -a, --all          include remote-tracking branches
+  -i, --interactive  interactive branch picker
+      --no-color     disable colored output
+  -v, --version      show version
+`)
 	}
 	flag.Parse()
 

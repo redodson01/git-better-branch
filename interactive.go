@@ -13,7 +13,6 @@ const cReverse = "\033[7m"
 // listItem represents one row in the interactive display.
 type listItem struct {
 	branch *Branch // non-nil for selectable branch rows
-	header string  // section header text (non-selectable)
 	blank  bool    // blank separator line (non-selectable)
 }
 
@@ -242,7 +241,7 @@ func (m tuiModel) View() string {
 	if m.searching {
 		lines = append(lines, clr(cBold, "/") + m.query + clr(cDim, "▏"))
 	} else {
-		lines = append(lines, clr(cDim, "  ↑/↓ navigate  enter checkout  / search  q quit"))
+		lines = append(lines, clr(cDim, "  Esc/q quit | ↑/↓ navigate | Enter checkout | / search"))
 	}
 
 	return strings.Join(lines, "\n")
@@ -267,8 +266,6 @@ func (m tuiModel) renderNormalView(viewH int) []string {
 		switch {
 		case item.blank:
 			line = ""
-		case item.header != "":
-			line = clr(cBold+cBlue, item.header)
 		default:
 			line = renderLine(item.branch, m.cw, m.tw)
 		}
