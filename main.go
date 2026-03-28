@@ -417,7 +417,7 @@ func printBranches(w io.Writer, branches []Branch, tw int, cw colWidths) {
 // pageOutput writes data to stdout, using a pager if it exceeds the terminal height.
 // pagerCommand returns the pager command and arguments, following git's
 // precedence: GIT_PAGER > core.pager > PAGER, falling back to "less -RFX".
-// An empty value for GIT_PAGER or PAGER means "no pager" (returns "", nil).
+// An empty value at any level means "no pager" (returns "", nil).
 func pagerCommand() (string, []string) {
 	if p, ok := os.LookupEnv("GIT_PAGER"); ok {
 		if p == "" {
@@ -426,9 +426,11 @@ func pagerCommand() (string, []string) {
 		return "sh", []string{"-c", p}
 	}
 	if out, err := exec.Command("git", "config", "core.pager").Output(); err == nil {
-		if p := strings.TrimSpace(string(out)); p != "" {
-			return "sh", []string{"-c", p}
+		p := strings.TrimSpace(string(out))
+		if p == "" {
+			return "", nil
 		}
+		return "sh", []string{"-c", p}
 	}
 	if p, ok := os.LookupEnv("PAGER"); ok {
 		if p == "" {

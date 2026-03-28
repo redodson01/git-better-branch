@@ -1091,3 +1091,65 @@ func TestPagerCommand(t *testing.T) {
 		})
 	}
 }
+
+func TestNavigationKeys(t *testing.T) {
+	colorOn = false
+	defer func() { colorOn = false }()
+
+	items := make([]listItem, 20)
+	selIdx := make([]int, 20)
+	for i := range items {
+		items[i] = listItem{branch: &Branch{Name: fmt.Sprintf("b%d", i), DisplayName: fmt.Sprintf("b%d", i)}}
+		selIdx[i] = i
+	}
+	items[0].branch.IsHead = true
+
+	base := tuiModel{
+		items:  items,
+		selIdx: selIdx,
+		tw:     80,
+		th:     10, // viewHeight = 10 - 2 = 8
+		cursor: 5,
+	}
+
+	// g → top
+	m := base
+	result, _ := m.updateNormal(runeKey('g'))
+	rm := result.(tuiModel)
+	if rm.cursor != 0 {
+		t.Errorf("g: cursor = %d, want 0", rm.cursor)
+	}
+
+	// G → bottom
+	m = base
+	result, _ = m.updateNormal(runeKey('G'))
+	rm = result.(tuiModel)
+	if rm.cursor != 19 {
+		t.Errorf("G: cursor = %d, want 19", rm.cursor)
+	}
+
+	// pgdown from cursor 5 with viewHeight 8 → 13
+	m = base
+	result, _ = m.updateNormal(tea.KeyMsg{Type: tea.KeyPgDown})
+	rm = result.(tuiModel)
+	if rm.cursor != 13 {
+		t.Errorf("pgdown: cursor = %d, want 13", rm.cursor)
+	}
+
+	// pgup from cursor 5 with viewHeight 8 → 0 (clamped)
+	m = base
+	result, _ = m.updateNormal(tea.KeyMsg{Type: tea.KeyPgUp})
+	rm = result.(tuiModel)
+	if rm.cursor != 0 {
+		t.Errorf("pgup: cursor = %d, want 0", rm.cursor)
+	}
+
+	// pgdown at end → stays at 19
+	m = base
+	m.cursor = 19
+	result, _ = m.updateNormal(tea.KeyMsg{Type: tea.KeyPgDown})
+	rm = result.(tuiModel)
+	if rm.cursor != 19 {
+		t.Errorf("pgdown at end: cursor = %d, want 19", rm.cursor)
+	}
+}
