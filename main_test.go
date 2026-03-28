@@ -366,6 +366,35 @@ func TestPrintBranches(t *testing.T) {
 	}
 }
 
+func TestPrintBranchesNoDevColumn(t *testing.T) {
+	colorOn = false
+	defer func() { colorOn = false }()
+
+	branches := []Branch{
+		{Name: "main", DisplayName: "main", ShortHash: "abc1234", Upstream: "origin/main", UpstreamRemote: "origin", IsHead: true, Subject: "Initial commit"},
+		{Name: "feature", DisplayName: "feature", ShortHash: "def5678", Subject: "Add feature"},
+	}
+	cw := computeWidths(branches, 100)
+
+	if cw.dev != 0 {
+		t.Fatalf("expected cw.dev=0, got %d", cw.dev)
+	}
+
+	var buf bytes.Buffer
+	printBranches(&buf, branches, 100, cw)
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+
+	// With no deviation column, name should be followed by 2-space gap then remote/hash.
+	// Should NOT have the extra gap from an empty dev column.
+	for i, line := range lines {
+		nameEnd := 2 + cw.name // indicator(2) + name column
+		tail := line[nameEnd:]
+		if strings.HasPrefix(tail, "    ") {
+			t.Errorf("line %d: unexpected 4+ space gap after name column (empty dev column not omitted?): %q", i, line)
+		}
+	}
+}
+
 func TestRenderLine(t *testing.T) {
 	colorOn = false
 	defer func() { colorOn = false }()
@@ -386,6 +415,18 @@ func TestRenderLine(t *testing.T) {
 	rplain := stripAnsi(rline)
 	if !strings.Contains(rplain, "feature") || !strings.Contains(rplain, "origin") {
 		t.Errorf("renderLine remote: missing expected content in %q", rplain)
+	}
+
+	// No deviation column: dev column should be omitted entirely.
+	cwNoDev := colWidths{name: 20, dev: 0, remote: 10, hash: 7}
+	nline := renderLine(b, cwNoDev, 80)
+	nplain := stripAnsi(nline)
+	if !strings.Contains(nplain, "main") || !strings.Contains(nplain, "origin") {
+		t.Errorf("renderLine no-dev: missing expected content in %q", nplain)
+	}
+	// With dev=0, the line should be shorter (no dev column or its gaps).
+	if runeLen(nplain) >= runeLen(plain) {
+		t.Errorf("renderLine no-dev: expected shorter line, got %d >= %d", runeLen(nplain), runeLen(plain))
 	}
 }
 

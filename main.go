@@ -303,8 +303,12 @@ func computeWidths(branches []Branch, tw int) colWidths {
 		cw.remote = 20
 	}
 
-	// Layout: indicator(2) + name + gap(1) + dev + gap(1) + remote + gap(1) + hash + gap(1) + tail(>=20)
-	nameCap := tw - 2 - 1 - cw.dev - 1 - cw.remote - 1 - cw.hash - 1 - 20
+	// Layout: indicator(2) + name + gap(2) [+ dev + gap(2)] + remote + gap(2) + hash + gap(2) + tail(>=20)
+	devOverhead := 0
+	if cw.dev > 0 {
+		devOverhead = cw.dev + 2
+	}
+	nameCap := tw - 2 - 2 - devOverhead - cw.remote - 2 - cw.hash - 2 - 20
 	if nameCap < 20 {
 		nameCap = 20
 	}
@@ -321,7 +325,8 @@ func computeWidths(branches []Branch, tw int) colWidths {
 // printBranches renders branch lines for non-interactive output.
 // The interactive mode uses renderLine (interactive.go) instead, which
 // packs gap spaces inside each column's color span for clean reverse-video
-// selection highlighting. The two paths use intentionally different spacing.
+// selection highlighting. Both paths use 2-space gaps between columns.
+// The deviation column is omitted entirely when no branch has deviation.
 func printBranches(w io.Writer, branches []Branch, tw int, cw colWidths) {
 	for _, b := range branches {
 		// Indicator.
@@ -351,11 +356,16 @@ func printBranches(w io.Writer, branches []Branch, tw int, cw colWidths) {
 			name = name + namePad
 		}
 
-		dp := devPlain(b)
-		dc := devColored(b)
-		dPad := strings.Repeat(" ", cw.dev-runeLen(dp))
-		if b.IsRemote && dc == "" {
-			dPad = clr(cRed, dPad)
+		// Deviation (omitted when no branch has deviation).
+		var dev string
+		if cw.dev > 0 {
+			dp := devPlain(b)
+			dc := devColored(b)
+			dPad := strings.Repeat(" ", cw.dev-runeLen(dp))
+			if b.IsRemote && dc == "" {
+				dPad = clr(cRed, dPad)
+			}
+			dev = "  " + dc + dPad
 		}
 
 		rp := trunc(remotePlain(b), cw.remote)
@@ -372,14 +382,17 @@ func printBranches(w io.Writer, branches []Branch, tw int, cw colWidths) {
 			wtPlainLen = 3 + runeLen(b.WorktreePath)
 		}
 
-		used := 2 + cw.name + 1 + cw.dev + 1 + cw.remote + 1 + cw.hash + 1 + wtPlainLen
+		used := 2 + cw.name + 2 + cw.remote + 2 + cw.hash + 2 + wtPlainLen
+		if cw.dev > 0 {
+			used += 2 + cw.dev
+		}
 		subWidth := tw - used
 		if subWidth < 10 {
 			subWidth = 10
 		}
 		subject := trunc(b.Subject, subWidth)
 
-		_, _ = fmt.Fprintf(w, "%s%s %s%s %s%s %s %s%s\n", ind, name, dc, dPad, rc, rPad, hash, subject, wtTag)
+		_, _ = fmt.Fprintf(w, "%s%s%s  %s%s  %s  %s%s\n", ind, name, dev, rc, rPad, hash, subject, wtTag)
 	}
 }
 

@@ -547,19 +547,22 @@ func renderLine(b *Branch, cw colWidths, tw int) string {
 	}
 
 	// Deviation: leading space + content + pad + trailing space, in dev color.
-	dp := devPlain(*b)
-	devBody := " " + dp + strings.Repeat(" ", cw.dev-runeLen(dp)+1)
+	// Omitted entirely when no branch has deviation.
 	var dev string
-	if dc := devColorCode(*b); dc != "" {
-		dev = clr(dc, devBody)
-	} else if b.IsRemote {
-		dev = clr(cRed, devBody)
-	} else if b.IsHead {
-		dev = clr(cBoldGrn, devBody)
-	} else if b.WorktreePath != "" {
-		dev = clr(cBoldCyan, devBody)
-	} else {
-		dev = devBody
+	if cw.dev > 0 {
+		dp := devPlain(*b)
+		devBody := " " + dp + strings.Repeat(" ", cw.dev-runeLen(dp)+1)
+		if dc := devColorCode(*b); dc != "" {
+			dev = clr(dc, devBody)
+		} else if b.IsRemote {
+			dev = clr(cRed, devBody)
+		} else if b.IsHead {
+			dev = clr(cBoldGrn, devBody)
+		} else if b.WorktreePath != "" {
+			dev = clr(cBoldCyan, devBody)
+		} else {
+			dev = devBody
+		}
 	}
 
 	// Remote: leading space + content + pad + trailing space, in remote color.
@@ -586,7 +589,10 @@ func renderLine(b *Branch, cw colWidths, tw int) string {
 		wtPlainLen = 3 + runeLen(b.WorktreePath)
 	}
 
-	used := 2 + (cw.name + 1) + (1 + cw.dev + 1) + (1 + cw.remote + 1) + (1 + cw.hash + 1) + 1 + wtPlainLen
+	used := 2 + (cw.name + 1) + (1 + cw.remote + 1) + (1 + cw.hash + 1) + 1 + wtPlainLen
+	if cw.dev > 0 {
+		used += 1 + cw.dev + 1
+	}
 	subWidth := tw - used
 	if subWidth < 10 {
 		subWidth = 10
