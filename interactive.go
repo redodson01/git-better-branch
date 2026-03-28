@@ -207,14 +207,14 @@ func (m tuiModel) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m tuiModel) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "y", "Y":
+	case "Y":
 		b := m.items[m.selIdx[m.cursor]].branch
-		output, err := gitBranchDelete(b.Name, m.confirmForce)
+		_, err := gitBranchDelete(b.Name, m.confirmForce)
 		if err != nil {
 			m.statusMsg = err.Error()
 			m.statusIsErr = true
 		} else {
-			m.statusMsg = output
+			m.statusMsg = fmt.Sprintf("Deleted branch '%s' (was %s)", b.Name, b.ShortHash)
 			m.statusIsErr = false
 			m.removeCurrent()
 		}
@@ -329,7 +329,7 @@ func (m tuiModel) View() string {
 		if m.confirmForce {
 			verb = "Force delete"
 		}
-		prompt := fmt.Sprintf("  %s '%s'? [y/n]", verb, b.Name)
+		prompt := fmt.Sprintf("  %s '%s'? [Y/n]", verb, b.Name)
 		lines = append(lines, clr(cYellow, trunc(prompt, m.tw)))
 	} else if m.searching {
 		lines = append(lines, clr(cBold, "/") + m.query + clr(cDim, "▏"))

@@ -624,7 +624,7 @@ func TestDeleteConfirmYes(t *testing.T) {
 	saved := gitBranchDelete
 	defer func() { gitBranchDelete = saved }()
 	gitBranchDelete = func(name string, force bool) (string, error) {
-		return fmt.Sprintf("Deleted branch %s (was abc1234).", name), nil
+		return "", nil
 	}
 
 	branches := []Branch{
@@ -648,19 +648,34 @@ func TestDeleteConfirmYes(t *testing.T) {
 		th:          24,
 	}
 
-	result, _ := m.updateConfirm(runeKey('y'))
+	result, _ := m.updateConfirm(runeKey('Y'))
 	rm := result.(tuiModel)
 	if rm.confirming {
-		t.Error("y should end confirmation")
+		t.Error("Y should end confirmation")
 	}
 	if rm.statusIsErr {
 		t.Errorf("expected success, got error: %q", rm.statusMsg)
 	}
-	if !strings.Contains(rm.statusMsg, "Deleted") {
-		t.Errorf("status = %q, want to contain 'Deleted'", rm.statusMsg)
+	if !strings.Contains(rm.statusMsg, "'feature'") {
+		t.Errorf("status = %q, want quoted branch name", rm.statusMsg)
+	}
+	if !strings.Contains(rm.statusMsg, "def5678") {
+		t.Errorf("status = %q, want short hash", rm.statusMsg)
 	}
 	if len(rm.selIdx) != 1 {
 		t.Fatalf("after delete: %d selectable, want 1", len(rm.selIdx))
+	}
+
+	// Lowercase y should cancel, not confirm.
+	m2 := m
+	m2.confirming = true
+	result2, _ := m2.updateConfirm(runeKey('y'))
+	rm2 := result2.(tuiModel)
+	if rm2.confirming {
+		t.Error("lowercase y should cancel confirmation")
+	}
+	if len(rm2.selIdx) != 2 {
+		t.Errorf("lowercase y should not delete: %d selectable, want 2", len(rm2.selIdx))
 	}
 }
 
@@ -695,7 +710,7 @@ func TestDeleteConfirmError(t *testing.T) {
 		th:          24,
 	}
 
-	result, _ := m.updateConfirm(runeKey('y'))
+	result, _ := m.updateConfirm(runeKey('Y'))
 	rm := result.(tuiModel)
 	if !rm.statusIsErr {
 		t.Error("expected error status")
@@ -811,13 +826,13 @@ func TestViewConfirm(t *testing.T) {
 	}
 
 	view := m.View()
-	if !strings.Contains(view, "Delete 'feature'? [y/n]") {
+	if !strings.Contains(view, "Delete 'feature'? [Y/n]") {
 		t.Errorf("view should show delete confirmation, got:\n%s", view)
 	}
 
 	m.confirmForce = true
 	view = m.View()
-	if !strings.Contains(view, "Force delete 'feature'? [y/n]") {
+	if !strings.Contains(view, "Force delete 'feature'? [Y/n]") {
 		t.Errorf("view should show force delete confirmation, got:\n%s", view)
 	}
 }
