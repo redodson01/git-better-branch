@@ -395,7 +395,7 @@ func (m tuiModel) View() string {
 		}
 		lines = append(lines, clr(cYellow, trunc(prompt, m.tw)))
 	} else if m.searching {
-		lines = append(lines, clr(cBold, "/") + m.query + clr(cDim, "▏"))
+		lines = append(lines, clr(cBold, "/")+m.query+clr(cDim, "▏"))
 	} else if m.statusMsg != "" {
 		c := cGreen
 		if m.statusIsErr {

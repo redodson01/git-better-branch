@@ -20,9 +20,9 @@ func TestTrunc(t *testing.T) {
 		{"hello", 5, "hello"},
 		{"hello", 4, "hel…"},
 		{"hello", 1, "…"},
-		{"テスト", 6, "テスト"},   // 3 CJK chars = 6 columns, fits exactly
-		{"テスト", 5, "テス…"},   // 2 CJK chars (4 cols) + ellipsis (1 col) = 5
-		{"テスト", 2, "…"},      // only room for ellipsis
+		{"テスト", 6, "テスト"}, // 3 CJK chars = 6 columns, fits exactly
+		{"テスト", 5, "テス…"}, // 2 CJK chars (4 cols) + ellipsis (1 col) = 5
+		{"テスト", 2, "…"},   // only room for ellipsis
 		{"", 5, ""},
 		{"abc", 3, "abc"},
 		{"abcd", 3, "ab…"},
@@ -46,7 +46,7 @@ func TestRuneLen(t *testing.T) {
 		{"", 0},
 		{"↑3↓2", 4},
 		{"…", 1},
-		{"テスト", 6},    // 3 CJK chars = 6 display columns
+		{"テスト", 6},   // 3 CJK chars = 6 display columns
 		{"aテストb", 8}, // 1 + 6 + 1 = 8
 	}
 	for _, tt := range tests {

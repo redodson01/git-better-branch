@@ -165,14 +165,14 @@ func loadBranches(includeRemotes bool) ([]Branch, error) {
 	// Tab-separated fields. Subject is last so any tabs it contains are harmless
 	// (SplitN caps the split count, so the tail stays in the last field).
 	format := strings.Join([]string{
-		"%(HEAD)",                       // 0: * or space
-		"%(refname)",                    // 1: full ref
-		"%(refname:short)",              // 2: short ref
-		"%(objectname:short)",           // 3: abbrev hash
-		"%(upstream:short)",             // 4: upstream short
-		"%(upstream:track,nobracket)",   // 5: ahead/behind/gone
-		"%(worktreepath)",               // 6: worktree path
-		"%(subject)",                    // 7: commit subject
+		"%(HEAD)",                     // 0: * or space
+		"%(refname)",                  // 1: full ref
+		"%(refname:short)",            // 2: short ref
+		"%(objectname:short)",         // 3: abbrev hash
+		"%(upstream:short)",           // 4: upstream short
+		"%(upstream:track,nobracket)", // 5: ahead/behind/gone
+		"%(worktreepath)",             // 6: worktree path
+		"%(subject)",                  // 7: commit subject
 	}, "\t")
 
 	args := []string{"for-each-ref", "--format", format, "refs/heads/"}
