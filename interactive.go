@@ -196,56 +196,28 @@ func (m tuiModel) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q", "esc", "ctrl+c":
 		return m, tea.Quit
 	case "up", "k":
-		if m.cursor > 0 {
-			m.cursor--
-			m.ensureVisible()
-		}
+		m.cursor = max(0, m.cursor-1)
+		m.ensureVisible()
 	case "down", "j":
-		if m.cursor < len(m.selIdx)-1 {
-			m.cursor++
-			m.ensureVisible()
-		}
+		m.cursor = min(len(m.selIdx)-1, m.cursor+1)
+		m.ensureVisible()
 	case "g", "home":
 		m.cursor = 0
 		m.ensureVisible()
 	case "G", "end":
-		if len(m.selIdx) > 0 {
-			m.cursor = len(m.selIdx) - 1
-		}
+		m.cursor = max(0, len(m.selIdx)-1)
 		m.ensureVisible()
 	case "pgup":
-		m.cursor -= m.viewHeight()
-		if m.cursor < 0 {
-			m.cursor = 0
-		}
+		m.cursor = max(0, m.cursor-m.viewHeight())
 		m.ensureVisible()
 	case "pgdown":
-		m.cursor += m.viewHeight()
-		if m.cursor > len(m.selIdx)-1 {
-			m.cursor = len(m.selIdx) - 1
-		}
+		m.cursor = min(len(m.selIdx)-1, m.cursor+m.viewHeight())
 		m.ensureVisible()
 	case "enter":
 		m.chosen = m.items[m.selIdx[m.cursor]].branch
 		return m, tea.Quit
 	case "d", "D":
-		b := m.items[m.selIdx[m.cursor]].branch
-		if b.IsHead || b.WorktreePath != "" {
-			m.statusMsg = "cannot delete a branch that is checked out"
-			m.statusIsErr = true
-		} else if b.IsRemote && msg.String() == "d" {
-			m.statusMsg = "use D to delete remote branches"
-			m.statusIsErr = true
-		} else if b.IsRemote {
-			m.confirming = true
-			m.confirmForce = true
-		} else if msg.String() == "d" && !isBranchMerged(b.Name) {
-			m.statusMsg = "not fully merged (use D to force)"
-			m.statusIsErr = true
-		} else {
-			m.confirming = true
-			m.confirmForce = msg.String() == "D"
-		}
+		m.handleDeleteKey(msg.String() == "D")
 	case "/":
 		m.savedCursor = m.cursor
 		m.savedOffset = m.offset
@@ -254,6 +226,26 @@ func (m tuiModel) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filteredIdx = nil
 	}
 	return m, nil
+}
+
+func (m *tuiModel) handleDeleteKey(force bool) {
+	b := m.items[m.selIdx[m.cursor]].branch
+	if b.IsHead || b.WorktreePath != "" {
+		m.statusMsg = "cannot delete a branch that is checked out"
+		m.statusIsErr = true
+	} else if b.IsRemote && !force {
+		m.statusMsg = "use D to delete remote branches"
+		m.statusIsErr = true
+	} else if b.IsRemote {
+		m.confirming = true
+		m.confirmForce = true
+	} else if !force && !isBranchMerged(b.Name) {
+		m.statusMsg = "not fully merged (use D to force)"
+		m.statusIsErr = true
+	} else {
+		m.confirming = true
+		m.confirmForce = force
+	}
 }
 
 func (m tuiModel) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -298,27 +290,10 @@ func (m tuiModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "enter":
-		vis := m.visibleSel()
-		if len(vis) > 0 && m.cursor < len(vis) {
-			// Exit search with cursor on the selected result.
-			itemIdx := vis[m.cursor]
-			for i, si := range m.selIdx {
-				if si == itemIdx {
-					m.cursor = i
-					break
-				}
-			}
-			m.searching = false
-			m.query = ""
-			m.filteredIdx = nil
-			m.offset = 0
-			m.ensureVisible()
-		}
+		m.acceptSearchResult()
 	case "up":
-		if m.cursor > 0 {
-			m.cursor--
-			m.ensureVisible()
-		}
+		m.cursor = max(0, m.cursor-1)
+		m.ensureVisible()
 	case "down":
 		vis := m.visibleSel()
 		if len(vis) > 0 && m.cursor < len(vis)-1 {
@@ -338,6 +313,25 @@ func (m tuiModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m *tuiModel) acceptSearchResult() {
+	vis := m.visibleSel()
+	if len(vis) == 0 || m.cursor >= len(vis) {
+		return
+	}
+	itemIdx := vis[m.cursor]
+	for i, si := range m.selIdx {
+		if si == itemIdx {
+			m.cursor = i
+			break
+		}
+	}
+	m.searching = false
+	m.query = ""
+	m.filteredIdx = nil
+	m.offset = 0
+	m.ensureVisible()
 }
 
 // visibleSel returns the active list of selectable item indices.
@@ -585,40 +579,41 @@ func searchTarget(b *Branch) string {
 
 // --- line rendering (with colored gaps for clean reverse-video) ---
 
+// branchColor returns the base ANSI color for a branch row.
+func branchColor(b *Branch) string {
+	switch {
+	case b.IsHead:
+		return cBoldGrn
+	case b.WorktreePath != "":
+		return cBoldCyan
+	case b.IsRemote:
+		return cRed
+	default:
+		return ""
+	}
+}
+
 // renderLine produces a branch line where each column's gap spaces
 // are inside that column's color span. This ensures reverse video shows a
 // continuous colored background instead of gray patches between columns.
 func renderLine(b *Branch, cw colWidths, tw int) string {
 	// Each column has a leading and trailing space in its own color,
 	// producing 2 colored spaces between adjacent columns.
+	bc := branchColor(b)
 
 	// Indicator: trailing space inside color span.
-	var ind string
-	switch {
-	case b.IsHead:
-		ind = clr(cBoldGrn, "* ")
-	case b.WorktreePath != "":
-		ind = clr(cBoldCyan, "+ ")
-	case b.IsRemote:
-		ind = clr(cRed, "  ")
-	default:
-		ind = "  "
+	indChar := "  "
+	if b.IsHead {
+		indChar = "* "
+	} else if b.WorktreePath != "" {
+		indChar = "+ "
 	}
+	ind := clrOr(bc, indChar)
 
 	// Name: content + pad + trailing space, in name color.
 	nameText := trunc(b.DisplayName, cw.name)
 	nameTrail := strings.Repeat(" ", cw.name-runeLen(nameText)+1)
-	var name string
-	switch {
-	case b.IsHead:
-		name = clr(cBoldGrn, nameText+nameTrail)
-	case b.WorktreePath != "":
-		name = clr(cBoldCyan, nameText+nameTrail)
-	case b.IsRemote:
-		name = clr(cRed, nameText+nameTrail)
-	default:
-		name = nameText + nameTrail
-	}
+	name := clrOr(bc, nameText+nameTrail)
 
 	// Deviation: leading space + content + pad + trailing space, in dev color.
 	// Omitted entirely when no branch has deviation.
@@ -628,14 +623,8 @@ func renderLine(b *Branch, cw colWidths, tw int) string {
 		devBody := " " + dp + strings.Repeat(" ", cw.dev-runeLen(dp)+1)
 		if dc := devColorCode(*b); dc != "" {
 			dev = clr(dc, devBody)
-		} else if b.IsRemote {
-			dev = clr(cRed, devBody)
-		} else if b.IsHead {
-			dev = clr(cBoldGrn, devBody)
-		} else if b.WorktreePath != "" {
-			dev = clr(cBoldCyan, devBody)
 		} else {
-			dev = devBody
+			dev = clrOr(bc, devBody)
 		}
 	}
 

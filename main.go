@@ -45,6 +45,14 @@ func clr(code, text string) string {
 	return code + text + cReset
 }
 
+// clrOr wraps text in the given color, or returns it plain if code is empty.
+func clrOr(code, text string) string {
+	if code == "" {
+		return text
+	}
+	return clr(code, text)
+}
+
 // Branch holds parsed information about a single git ref.
 type Branch struct {
 	Name           string // refname:short
@@ -242,22 +250,7 @@ func parseBranches(raw string) []Branch {
 			b.DisplayName = b.Name
 		}
 
-		// Tracking info.
-		track := fields[5]
-		switch {
-		case track == "gone":
-			b.Gone = true
-		case track != "":
-			for _, part := range strings.Split(track, ", ") {
-				part = strings.TrimSpace(part)
-				// Atoi errors are intentionally ignored — git's format is well-defined.
-				if strings.HasPrefix(part, "ahead ") {
-					b.Ahead, _ = strconv.Atoi(strings.TrimPrefix(part, "ahead "))
-				} else if strings.HasPrefix(part, "behind ") {
-					b.Behind, _ = strconv.Atoi(strings.TrimPrefix(part, "behind "))
-				}
-			}
-		}
+		parseTracking(fields[5], &b)
 
 		// Worktree: store basename only, skip for current HEAD.
 		if fields[6] != "" && !b.IsHead {
@@ -268,6 +261,24 @@ func parseBranches(raw string) []Branch {
 	}
 
 	return branches
+}
+
+// parseTracking parses the upstream tracking field (e.g., "ahead 3, behind 1" or "gone").
+func parseTracking(track string, b *Branch) {
+	switch {
+	case track == "gone":
+		b.Gone = true
+	case track != "":
+		for _, part := range strings.Split(track, ", ") {
+			part = strings.TrimSpace(part)
+			// Atoi errors are intentionally ignored — git's format is well-defined.
+			if strings.HasPrefix(part, "ahead ") {
+				b.Ahead, _ = strconv.Atoi(strings.TrimPrefix(part, "ahead "))
+			} else if strings.HasPrefix(part, "behind ") {
+				b.Behind, _ = strconv.Atoi(strings.TrimPrefix(part, "behind "))
+			}
+		}
+	}
 }
 
 // -------------------------------------------------------------------
@@ -363,16 +374,7 @@ func printBranches(w io.Writer, branches []Branch, tw int, cw colWidths) {
 		// Name.
 		name := trunc(b.DisplayName, cw.name)
 		namePad := strings.Repeat(" ", cw.name-runeLen(name))
-		switch {
-		case b.IsHead:
-			name = clr(cBoldGrn, name+namePad)
-		case b.WorktreePath != "":
-			name = clr(cBoldCyan, name+namePad)
-		case b.IsRemote:
-			name = clr(cRed, name+namePad)
-		default:
-			name = name + namePad
-		}
+		name = clrOr(branchColor(&b), name+namePad)
 
 		// Deviation (omitted when no branch has deviation).
 		var dev string

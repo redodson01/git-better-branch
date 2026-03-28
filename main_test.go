@@ -98,6 +98,30 @@ func TestStripAnsi(t *testing.T) {
 	}
 }
 
+func TestClrOr(t *testing.T) {
+	colorOn = true
+	defer func() { colorOn = false }()
+
+	tests := []struct {
+		name string
+		code string
+		text string
+		want string
+	}{
+		{"empty code returns plain", "", "hello", "hello"},
+		{"non-empty code wraps text", cRed, "hello", cRed + "hello" + cReset},
+		{"empty text stays empty", cRed, "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := clrOr(tt.code, tt.text)
+			if got != tt.want {
+				t.Errorf("clrOr(%q, %q) = %q, want %q", tt.code, tt.text, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDevPlain(t *testing.T) {
 	tests := []struct {
 		name string
@@ -223,6 +247,37 @@ func TestComputeWidths(t *testing.T) {
 	cw3 := computeWidths(branches, 40)
 	if cw3.name < 20 {
 		t.Errorf("narrow terminal: name width %d below minimum of 20", cw3.name)
+	}
+}
+
+func TestParseTracking(t *testing.T) {
+	tests := []struct {
+		name   string
+		track  string
+		ahead  int
+		behind int
+		gone   bool
+	}{
+		{"empty", "", 0, 0, false},
+		{"gone", "gone", 0, 0, true},
+		{"ahead only", "ahead 3", 3, 0, false},
+		{"behind only", "behind 5", 0, 5, false},
+		{"diverged", "ahead 2, behind 3", 2, 3, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var b Branch
+			parseTracking(tt.track, &b)
+			if b.Ahead != tt.ahead {
+				t.Errorf("Ahead = %d, want %d", b.Ahead, tt.ahead)
+			}
+			if b.Behind != tt.behind {
+				t.Errorf("Behind = %d, want %d", b.Behind, tt.behind)
+			}
+			if b.Gone != tt.gone {
+				t.Errorf("Gone = %v, want %v", b.Gone, tt.gone)
+			}
+		})
 	}
 }
 
@@ -450,6 +505,30 @@ func TestSearchTarget(t *testing.T) {
 	}
 }
 
+func TestBranchColor(t *testing.T) {
+	tests := []struct {
+		name string
+		b    Branch
+		want string
+	}{
+		{"head branch", Branch{IsHead: true}, cBoldGrn},
+		{"worktree branch", Branch{WorktreePath: "/tmp/wt"}, cBoldCyan},
+		{"remote branch", Branch{IsRemote: true}, cRed},
+		{"plain local branch", Branch{}, ""},
+		{"head takes precedence over worktree", Branch{IsHead: true, WorktreePath: "/tmp/wt"}, cBoldGrn},
+		{"head takes precedence over remote", Branch{IsHead: true, IsRemote: true}, cBoldGrn},
+		{"worktree takes precedence over remote", Branch{WorktreePath: "/tmp/wt", IsRemote: true}, cBoldCyan},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := branchColor(&tt.b)
+			if got != tt.want {
+				t.Errorf("branchColor(%s) = %q, want %q", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDevColorCode(t *testing.T) {
 	tests := []struct {
 		name string
@@ -507,6 +586,28 @@ func runeKey(r rune) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
 }
 
+func assertStatusErr(t *testing.T, rm tuiModel, substr string) {
+	t.Helper()
+	if !rm.statusIsErr || !strings.Contains(rm.statusMsg, substr) {
+		t.Errorf("statusIsErr=%v msg=%q, want error containing %q", rm.statusIsErr, rm.statusMsg, substr)
+	}
+}
+
+func deleteGuardModel() tuiModel {
+	items := []listItem{
+		{branch: &Branch{Name: "main", DisplayName: "main", IsHead: true}},
+		{branch: &Branch{Name: "feature", DisplayName: "feature"}},
+		{branch: &Branch{DisplayName: "dev", IsRemote: true, RemoteName: "origin"}},
+		{branch: &Branch{Name: "wt-branch", DisplayName: "wt-branch", WorktreePath: "wt"}},
+	}
+	return tuiModel{
+		items:  items,
+		selIdx: []int{0, 1, 2, 3},
+		tw:     80,
+		th:     24,
+	}
+}
+
 func TestDeleteKeyGuards(t *testing.T) {
 	colorOn = false
 	defer func() { colorOn = false }()
@@ -515,90 +616,75 @@ func TestDeleteKeyGuards(t *testing.T) {
 	defer func() { isBranchMerged = savedMerged }()
 	isBranchMerged = func(string) bool { return true }
 
-	items := []listItem{
-		{branch: &Branch{Name: "main", DisplayName: "main", IsHead: true}},
-		{branch: &Branch{Name: "feature", DisplayName: "feature"}},
-		{branch: &Branch{DisplayName: "dev", IsRemote: true, RemoteName: "origin"}},
-		{branch: &Branch{Name: "wt-branch", DisplayName: "wt-branch", WorktreePath: "wt"}},
-	}
-	m := tuiModel{
-		items:  items,
-		selIdx: []int{0, 1, 2, 3},
-		tw:     80,
-		th:     24,
-	}
+	t.Run("d on HEAD", func(t *testing.T) {
+		m := deleteGuardModel()
+		m.cursor = 0
+		result, _ := m.updateNormal(runeKey('d'))
+		rm := result.(tuiModel)
+		assertStatusErr(t, rm, "checked out")
+		if rm.confirming {
+			t.Error("should not enter confirming")
+		}
+	})
 
-	// d on HEAD → error.
-	m.cursor = 0
-	result, _ := m.updateNormal(runeKey('d'))
-	rm := result.(tuiModel)
-	if !rm.statusIsErr || !strings.Contains(rm.statusMsg, "checked out") {
-		t.Errorf("d on HEAD: statusIsErr=%v msg=%q", rm.statusIsErr, rm.statusMsg)
-	}
-	if rm.confirming {
-		t.Error("d on HEAD: should not enter confirming")
-	}
+	t.Run("d on worktree branch", func(t *testing.T) {
+		m := deleteGuardModel()
+		m.cursor = 3
+		result, _ := m.updateNormal(runeKey('d'))
+		rm := result.(tuiModel)
+		assertStatusErr(t, rm, "checked out")
+	})
 
-	// d on worktree branch → error.
-	m.cursor = 3
-	m.statusMsg = ""
-	result, _ = m.updateNormal(runeKey('d'))
-	rm = result.(tuiModel)
-	if !rm.statusIsErr || !strings.Contains(rm.statusMsg, "checked out") {
-		t.Errorf("d on worktree: statusIsErr=%v msg=%q", rm.statusIsErr, rm.statusMsg)
-	}
+	t.Run("d on remote", func(t *testing.T) {
+		m := deleteGuardModel()
+		m.cursor = 2
+		result, _ := m.updateNormal(runeKey('d'))
+		rm := result.(tuiModel)
+		assertStatusErr(t, rm, "use D")
+	})
 
-	// d on remote → error with hint.
-	m.cursor = 2
-	m.statusMsg = ""
-	result, _ = m.updateNormal(runeKey('d'))
-	rm = result.(tuiModel)
-	if !rm.statusIsErr || !strings.Contains(rm.statusMsg, "use D") {
-		t.Errorf("d on remote: statusIsErr=%v msg=%q", rm.statusIsErr, rm.statusMsg)
-	}
+	t.Run("D on remote", func(t *testing.T) {
+		m := deleteGuardModel()
+		m.cursor = 2
+		result, _ := m.updateNormal(runeKey('D'))
+		rm := result.(tuiModel)
+		if !rm.confirming {
+			t.Error("should enter confirming")
+		}
+	})
 
-	// D on remote → confirmation.
-	m.cursor = 2
-	m.statusMsg = ""
-	m.confirming = false
-	result, _ = m.updateNormal(runeKey('D'))
-	rm = result.(tuiModel)
-	if !rm.confirming {
-		t.Error("D on remote: should enter confirming")
-	}
+	t.Run("d on merged local", func(t *testing.T) {
+		m := deleteGuardModel()
+		m.cursor = 1
+		result, _ := m.updateNormal(runeKey('d'))
+		rm := result.(tuiModel)
+		if !rm.confirming || rm.confirmForce {
+			t.Errorf("confirming=%v confirmForce=%v", rm.confirming, rm.confirmForce)
+		}
+	})
 
-	// d on merged local branch → confirmation.
-	m.cursor = 1
-	m.statusMsg = ""
-	result, _ = m.updateNormal(runeKey('d'))
-	rm = result.(tuiModel)
-	if !rm.confirming || rm.confirmForce {
-		t.Errorf("d merged: confirming=%v confirmForce=%v", rm.confirming, rm.confirmForce)
-	}
+	t.Run("d on unmerged local", func(t *testing.T) {
+		isBranchMerged = func(string) bool { return false }
+		m := deleteGuardModel()
+		m.cursor = 1
+		result, _ := m.updateNormal(runeKey('d'))
+		rm := result.(tuiModel)
+		assertStatusErr(t, rm, "not fully merged")
+		if rm.confirming {
+			t.Error("should not enter confirming")
+		}
+	})
 
-	// d on unmerged local branch → error with hint.
-	isBranchMerged = func(string) bool { return false }
-	m.cursor = 1
-	m.statusMsg = ""
-	m.confirming = false
-	result, _ = m.updateNormal(runeKey('d'))
-	rm = result.(tuiModel)
-	if !rm.statusIsErr || !strings.Contains(rm.statusMsg, "not fully merged") {
-		t.Errorf("d unmerged: statusIsErr=%v msg=%q", rm.statusIsErr, rm.statusMsg)
-	}
-	if rm.confirming {
-		t.Error("d unmerged: should not enter confirming")
-	}
-
-	// D on unmerged local branch → still enters force confirmation.
-	m.cursor = 1
-	m.statusMsg = ""
-	m.confirming = false
-	result, _ = m.updateNormal(runeKey('D'))
-	rm = result.(tuiModel)
-	if !rm.confirming || !rm.confirmForce {
-		t.Errorf("D unmerged: confirming=%v confirmForce=%v", rm.confirming, rm.confirmForce)
-	}
+	t.Run("D on unmerged local", func(t *testing.T) {
+		isBranchMerged = func(string) bool { return false }
+		m := deleteGuardModel()
+		m.cursor = 1
+		result, _ := m.updateNormal(runeKey('D'))
+		rm := result.(tuiModel)
+		if !rm.confirming || !rm.confirmForce {
+			t.Errorf("confirming=%v confirmForce=%v", rm.confirming, rm.confirmForce)
+		}
+	})
 }
 
 func TestDeleteConfirmCancel(t *testing.T) {
