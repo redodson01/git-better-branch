@@ -547,13 +547,23 @@ func TestDeleteKeyGuards(t *testing.T) {
 		t.Errorf("d on worktree: statusIsErr=%v msg=%q", rm.statusIsErr, rm.statusMsg)
 	}
 
-	// d on remote → error.
+	// d on remote → error with hint.
 	m.cursor = 2
 	m.statusMsg = ""
 	result, _ = m.updateNormal(runeKey('d'))
 	rm = result.(tuiModel)
-	if !rm.statusIsErr || !strings.Contains(rm.statusMsg, "remote") {
+	if !rm.statusIsErr || !strings.Contains(rm.statusMsg, "use D") {
 		t.Errorf("d on remote: statusIsErr=%v msg=%q", rm.statusIsErr, rm.statusMsg)
+	}
+
+	// D on remote → confirmation.
+	m.cursor = 2
+	m.statusMsg = ""
+	m.confirming = false
+	result, _ = m.updateNormal(runeKey('D'))
+	rm = result.(tuiModel)
+	if !rm.confirming {
+		t.Error("D on remote: should enter confirming")
 	}
 
 	// d on merged local branch → confirmation.
@@ -721,6 +731,83 @@ func TestDeleteConfirmError(t *testing.T) {
 	// Branch should NOT be removed on error.
 	if len(rm.selIdx) != 2 {
 		t.Errorf("after failed delete: %d selectable, want 2", len(rm.selIdx))
+	}
+}
+
+func TestDeleteRemoteBranch(t *testing.T) {
+	colorOn = false
+	defer func() { colorOn = false }()
+
+	savedRemote := gitRemoteBranchDelete
+	defer func() { gitRemoteBranchDelete = savedRemote }()
+
+	var deletedRemote, deletedBranch string
+	gitRemoteBranchDelete = func(remote, branch string) error {
+		deletedRemote = remote
+		deletedBranch = branch
+		return nil
+	}
+
+	branches := []Branch{
+		{Name: "main", DisplayName: "main", IsHead: true, ShortHash: "abc1234"},
+		{Name: "origin/feature", DisplayName: "feature", ShortHash: "def5678", IsRemote: true, RemoteName: "origin"},
+	}
+	var items []listItem
+	var selIdx []int
+	for i := range branches {
+		selIdx = append(selIdx, len(items))
+		items = append(items, listItem{branch: &branches[i]})
+	}
+
+	m := tuiModel{
+		allBranches: append([]Branch{}, branches...),
+		items:       items,
+		selIdx:      selIdx,
+		cursor:      1,
+		confirming:  true,
+		tw:          80,
+		th:          24,
+	}
+
+	result, _ := m.updateConfirm(runeKey('Y'))
+	rm := result.(tuiModel)
+	if rm.statusIsErr {
+		t.Errorf("expected success, got error: %q", rm.statusMsg)
+	}
+	if !strings.Contains(rm.statusMsg, "remote branch") {
+		t.Errorf("status = %q, want 'remote branch'", rm.statusMsg)
+	}
+	if !strings.Contains(rm.statusMsg, "'origin/feature'") {
+		t.Errorf("status = %q, want quoted name", rm.statusMsg)
+	}
+	if deletedRemote != "origin" || deletedBranch != "feature" {
+		t.Errorf("called delete(%q, %q), want (origin, feature)", deletedRemote, deletedBranch)
+	}
+	if len(rm.selIdx) != 1 {
+		t.Fatalf("after delete: %d selectable, want 1", len(rm.selIdx))
+	}
+}
+
+func TestViewConfirmRemote(t *testing.T) {
+	colorOn = false
+	defer func() { colorOn = false }()
+
+	items := []listItem{
+		{branch: &Branch{Name: "origin/feature", DisplayName: "feature", ShortHash: "def5678", IsRemote: true, RemoteName: "origin"}},
+	}
+	m := tuiModel{
+		items:      items,
+		selIdx:     []int{0},
+		cursor:     0,
+		confirming: true,
+		tw:         80,
+		th:         10,
+		cw:         colWidths{name: 20, dev: 0, remote: 10, hash: 7},
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "Delete 'origin/feature' from remote? [Y/n]") {
+		t.Errorf("view should show remote delete confirmation, got:\n%s", view)
 	}
 }
 

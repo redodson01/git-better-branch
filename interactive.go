@@ -138,6 +138,34 @@ var isBranchMerged = func(name string) bool {
 	return exec.Command("git", "merge-base", "--is-ancestor", "--", name, "HEAD").Run() == nil
 }
 
+var gitRemoteBranchDelete = func(remote, branch string) error {
+	cmd := exec.Command("git", "push", remote, "--delete", branch)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		output := strings.TrimSpace(string(out))
+		if output != "" {
+			// git push puts the reason on "! [remote rejected]" or
+			// "error:"/"fatal:" lines, not the first line ("To <url>").
+			for _, line := range strings.Split(output, "\n") {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(line, "! ") {
+					if idx := strings.Index(line, "("); idx >= 0 {
+						return fmt.Errorf("%s", strings.TrimSuffix(line[idx+1:], ")"))
+					}
+					return fmt.Errorf("%s", line)
+				}
+				for _, prefix := range []string{"error: ", "fatal: ", "remote: "} {
+					if strings.HasPrefix(line, prefix) {
+						return fmt.Errorf("%s", strings.TrimPrefix(line, prefix))
+					}
+				}
+			}
+		}
+		return fmt.Errorf("git push --delete: %w", err)
+	}
+	return nil
+}
+
 // --- bubbletea Model interface ---
 
 func (m tuiModel) Init() tea.Cmd {
@@ -185,9 +213,12 @@ func (m tuiModel) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if b.IsHead || b.WorktreePath != "" {
 			m.statusMsg = "cannot delete a branch that is checked out"
 			m.statusIsErr = true
-		} else if b.IsRemote {
-			m.statusMsg = "cannot delete a remote branch"
+		} else if b.IsRemote && msg.String() == "d" {
+			m.statusMsg = "use D to delete remote branches"
 			m.statusIsErr = true
+		} else if b.IsRemote {
+			m.confirming = true
+			m.confirmForce = true
 		} else if msg.String() == "d" && !isBranchMerged(b.Name) {
 			m.statusMsg = "not fully merged (use D to force)"
 			m.statusIsErr = true
@@ -209,12 +240,21 @@ func (m tuiModel) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "Y":
 		b := m.items[m.selIdx[m.cursor]].branch
-		_, err := gitBranchDelete(b.Name, m.confirmForce)
+		var err error
+		if b.IsRemote {
+			err = gitRemoteBranchDelete(b.RemoteName, b.DisplayName)
+		} else {
+			_, err = gitBranchDelete(b.Name, m.confirmForce)
+		}
 		if err != nil {
 			m.statusMsg = err.Error()
 			m.statusIsErr = true
 		} else {
-			m.statusMsg = fmt.Sprintf("Deleted branch '%s' (was %s)", b.Name, b.ShortHash)
+			label := "branch"
+			if b.IsRemote {
+				label = "remote branch"
+			}
+			m.statusMsg = fmt.Sprintf("Deleted %s '%s' (was %s)", label, b.Name, b.ShortHash)
 			m.statusIsErr = false
 			m.removeCurrent()
 		}
@@ -325,11 +365,14 @@ func (m tuiModel) View() string {
 	lines = append(lines, "")
 	if m.confirming {
 		b := m.items[m.selIdx[m.cursor]].branch
-		verb := "Delete"
-		if m.confirmForce {
-			verb = "Force delete"
+		var prompt string
+		if b.IsRemote {
+			prompt = fmt.Sprintf("  Delete '%s' from remote? [Y/n]", b.Name)
+		} else if m.confirmForce {
+			prompt = fmt.Sprintf("  Force delete '%s'? [Y/n]", b.Name)
+		} else {
+			prompt = fmt.Sprintf("  Delete '%s'? [Y/n]", b.Name)
 		}
-		prompt := fmt.Sprintf("  %s '%s'? [Y/n]", verb, b.Name)
 		lines = append(lines, clr(cYellow, trunc(prompt, m.tw)))
 	} else if m.searching {
 		lines = append(lines, clr(cBold, "/") + m.query + clr(cDim, "▏"))
