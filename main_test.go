@@ -1016,62 +1016,66 @@ func TestSearchEnterReturnsToNormal(t *testing.T) {
 }
 
 func TestPagerCommand(t *testing.T) {
-	// Save and restore env vars.
-	for _, key := range []string{"GIT_PAGER", "PAGER"} {
+	// Save and restore env vars. Include GIT_CONFIG_GLOBAL and
+	// GIT_CONFIG_SYSTEM to isolate from host git config (prevents
+	// a user's core.pager from leaking into the test).
+	for _, key := range []string{"GIT_PAGER", "PAGER", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"} {
 		if orig, ok := os.LookupEnv(key); ok {
-			defer os.Setenv(key, orig)
+			defer func(k, v string) { _ = os.Setenv(k, v) }(key, orig)
 		} else {
-			defer os.Unsetenv(key)
+			defer func(k string) { _ = os.Unsetenv(k) }(key)
 		}
 	}
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
 
 	tests := []struct {
 		name     string
-		setup    func()
+		setup    func(t *testing.T)
 		wantName string
 		wantArgs []string
 	}{
 		{
 			name: "GIT_PAGER set",
-			setup: func() {
-				os.Setenv("GIT_PAGER", "bat")
-				os.Unsetenv("PAGER")
+			setup: func(t *testing.T) {
+				t.Setenv("GIT_PAGER", "bat")
+				_ = os.Unsetenv("PAGER")
 			},
 			wantName: "sh",
 			wantArgs: []string{"-c", "bat"},
 		},
 		{
 			name: "GIT_PAGER empty disables pager",
-			setup: func() {
-				os.Setenv("GIT_PAGER", "")
-				os.Setenv("PAGER", "more")
+			setup: func(t *testing.T) {
+				t.Setenv("GIT_PAGER", "")
+				t.Setenv("PAGER", "more")
 			},
 			wantName: "",
 			wantArgs: nil,
 		},
 		{
 			name: "PAGER fallback",
-			setup: func() {
-				os.Unsetenv("GIT_PAGER")
-				os.Setenv("PAGER", "more")
+			setup: func(t *testing.T) {
+				_ = os.Unsetenv("GIT_PAGER")
+				t.Setenv("PAGER", "more")
 			},
 			wantName: "sh",
 			wantArgs: []string{"-c", "more"},
 		},
 		{
 			name: "PAGER empty disables pager",
-			setup: func() {
-				os.Unsetenv("GIT_PAGER")
-				os.Setenv("PAGER", "")
+			setup: func(t *testing.T) {
+				_ = os.Unsetenv("GIT_PAGER")
+				t.Setenv("PAGER", "")
 			},
 			wantName: "",
 			wantArgs: nil,
 		},
 		{
 			name: "default is less",
-			setup: func() {
-				os.Unsetenv("GIT_PAGER")
-				os.Unsetenv("PAGER")
+			setup: func(t *testing.T) {
+				_ = os.Unsetenv("GIT_PAGER")
+				_ = os.Unsetenv("PAGER")
 			},
 			wantName: "less",
 			wantArgs: []string{"-RFX"},
@@ -1080,7 +1084,7 @@ func TestPagerCommand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.setup()
+			tt.setup(t)
 			name, args := pagerCommand()
 			if name != tt.wantName {
 				t.Errorf("name = %q, want %q", name, tt.wantName)
