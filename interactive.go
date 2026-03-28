@@ -240,8 +240,19 @@ func (m tuiModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		vis := m.visibleSel()
 		if len(vis) > 0 && m.cursor < len(vis) {
-			m.chosen = m.items[vis[m.cursor]].branch
-			return m, tea.Quit
+			// Exit search with cursor on the selected result.
+			itemIdx := vis[m.cursor]
+			for i, si := range m.selIdx {
+				if si == itemIdx {
+					m.cursor = i
+					break
+				}
+			}
+			m.searching = false
+			m.query = ""
+			m.filteredIdx = nil
+			m.offset = 0
+			m.ensureVisible()
 		}
 	case "up":
 		if m.cursor > 0 {

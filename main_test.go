@@ -868,3 +868,46 @@ func TestStatusClearsOnKey(t *testing.T) {
 		t.Errorf("status should be cleared, got %q", rm.statusMsg)
 	}
 }
+
+func TestSearchEnterReturnsToNormal(t *testing.T) {
+	colorOn = false
+	defer func() { colorOn = false }()
+
+	items := []listItem{
+		{branch: &Branch{Name: "main", DisplayName: "main", IsHead: true}},
+		{branch: &Branch{Name: "feature", DisplayName: "feature"}},
+		{branch: &Branch{Name: "bugfix", DisplayName: "bugfix"}},
+	}
+	m := tuiModel{
+		items:       items,
+		selIdx:      []int{0, 1, 2},
+		searching:   true,
+		query:       "feat",
+		filteredIdx: []int{1}, // only "feature" matches
+		cursor:      0,        // first (only) match
+		tw:          80,
+		th:          24,
+	}
+
+	result, cmd := m.updateSearch(tea.KeyMsg{Type: tea.KeyEnter})
+	rm := result.(tuiModel)
+
+	// Should exit search mode, not quit.
+	if cmd != nil {
+		t.Error("enter in search should not produce a quit command")
+	}
+	if rm.searching {
+		t.Error("should exit search mode")
+	}
+	if rm.chosen != nil {
+		t.Error("should not set chosen (no checkout)")
+	}
+
+	// Cursor should be on "feature" (selIdx position 1).
+	if rm.cursor != 1 {
+		t.Errorf("cursor = %d, want 1 (feature)", rm.cursor)
+	}
+	if rm.query != "" {
+		t.Errorf("query should be cleared, got %q", rm.query)
+	}
+}
