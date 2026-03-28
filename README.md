@@ -43,6 +43,14 @@ Features:
 
 ## Installation
 
+### Homebrew (macOS and Linux)
+
+```bash
+brew install redodson01/tap/git-better-branch
+```
+
+### From source
+
 Requires Go 1.26+.
 
 ```bash

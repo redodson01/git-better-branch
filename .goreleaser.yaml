@@ -1,0 +1,36 @@
+version: 2
+
+builds:
+  - binary: git-better-branch
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - format: tar.gz
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github-native
+
+brews:
+  - repository:
+      owner: redodson01
+      name: homebrew-tap
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/redodson01/git-better-branch
+    description: A better git branch viewer for repositories with long branch names, worktrees, and many remotes
+    license: MIT
+    install: |
+      bin.install "git-better-branch"
+    test: |
+      system bin/"git-better-branch", "--version"
