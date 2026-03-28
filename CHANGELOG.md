@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Passthrough of unrecognized flags and arguments to `git branch`
+
+### Changed
+
+- `-v` is no longer an alias for `--version`; it now passes through to `git branch -v`
+
 ## [0.1.0] - 2026-03-27
 
 ### Added

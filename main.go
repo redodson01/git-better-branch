@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -63,26 +64,43 @@ type Branch struct {
 }
 
 func main() {
-	showAll := flag.Bool("a", false, "include remote-tracking branches")
-	flag.BoolVar(showAll, "all", false, "include remote-tracking branches")
-	interactive := flag.Bool("i", false, "interactive branch picker")
-	flag.BoolVar(interactive, "interactive", false, "interactive branch picker")
-	noColor := flag.Bool("no-color", false, "disable colored output")
-	showVer := flag.Bool("version", false, "show version")
-	flag.BoolVar(showVer, "v", false, "show version")
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, `Usage: git better-branch [flags]
+	fs := flag.NewFlagSet("git-better-branch", flag.ContinueOnError)
 
-A better git branch viewer.
+	showAll := fs.Bool("a", false, "include remote-tracking branches")
+	fs.BoolVar(showAll, "all", false, "include remote-tracking branches")
+	interactive := fs.Bool("i", false, "interactive branch picker")
+	fs.BoolVar(interactive, "interactive", false, "interactive branch picker")
+	noColor := fs.Bool("no-color", false, "disable colored output")
+	showVer := fs.Bool("version", false, "show version")
+
+	fs.Usage = func() {
+		_, _ = fmt.Fprintf(fs.Output(), `Usage: git better-branch [flags]
+
+A better git branch viewer. Unrecognized flags are passed through to git branch.
 
 Flags:
   -a, --all          include remote-tracking branches
   -i, --interactive  interactive branch picker
       --no-color     disable colored output
-  -v, --version      show version
+      --version      show version
 `)
 	}
-	flag.Parse()
+
+	// Suppress default error output; we handle unknown flags via passthrough.
+	fs.SetOutput(io.Discard)
+
+	err := fs.Parse(os.Args[1:])
+	if err == flag.ErrHelp {
+		// -h / --help: fs.Usage fired but wrote to io.Discard.
+		// Re-print to stderr so the user sees it.
+		fs.SetOutput(os.Stderr)
+		fs.Usage()
+		return
+	}
+	if err != nil || fs.NArg() > 0 {
+		// Unrecognized flag or positional args → forward to git branch.
+		os.Exit(gitBranchPassthrough(os.Args[1:]))
+	}
 
 	if *showVer {
 		fmt.Printf("git-better-branch %s\n", version)
@@ -453,6 +471,23 @@ func pageOutput(data []byte, th int) {
 	_, _ = pipe.Write(data)
 	_ = pipe.Close()
 	_ = cmd.Wait()
+}
+
+// gitBranchPassthrough forwards args to git branch and returns the exit code.
+func gitBranchPassthrough(args []string) int {
+	cmd := exec.Command("git", append([]string{"branch"}, args...)...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return exitErr.ExitCode()
+		}
+		fmt.Fprintf(os.Stderr, "gbb: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 // -------------------------------------------------------------------

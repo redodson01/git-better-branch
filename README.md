@@ -65,6 +65,17 @@ git better-branch --no-color
 git better-branch --version
 ```
 
+### Passthrough
+
+Flags and arguments not recognized by `git better-branch` are passed through to `git branch`:
+
+```bash
+git better-branch -m old-name new-name   # rename a branch
+git better-branch -d feature             # delete a branch
+git better-branch -v                     # verbose git branch output
+git better-branch --sort=-committerdate  # sort by recent commit
+```
+
 ### Interactive mode
 
 Use the `-i` flag to launch a TUI branch picker:
