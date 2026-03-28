@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/redodson01/git-better-branch/actions/workflows/ci.yml/badge.svg)](https://github.com/redodson01/git-better-branch/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/redodson01/git-better-branch)](https://github.com/redodson01/git-better-branch/releases/latest)
+[![Go Report Card](https://goreportcard.com/badge/github.com/redodson01/git-better-branch)](https://goreportcard.com/report/github.com/redodson01/git-better-branch)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A better `git branch` viewer for repositories with long branch names, worktrees, and many remotes.
 
