@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-03-28
+
+### Changed
+
+- Reduce cyclomatic complexity of flagged functions by extracting helpers
+- Apply `gofmt -s` formatting and add `golangci-lint` config
+- Update README examples, screenshots, and badges for v0.1.0
+
 ## [0.1.0] - 2026-03-27
 
 ### Added
@@ -27,5 +35,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--no-color` flag and `NO_COLOR` environment variable support
 - Makefile with `build`, `install`, `uninstall`, `clean`, `test`, and `lint` targets
 
-[Unreleased]: https://github.com/redodson01/git-better-branch/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/redodson01/git-better-branch/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/redodson01/git-better-branch/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/redodson01/git-better-branch/releases/tag/v0.1.0
