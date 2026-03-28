@@ -87,6 +87,8 @@ Use the `-i` flag to launch a TUI branch picker:
 
 - **`/`** to fuzzy search (matches branch names and remote names)
 - **`j`/`k`** or **`↑`/`↓`** to navigate
+- **`g`/`G`** or **`Home`/`End`** to jump to top/bottom
+- **`PgUp`/`PgDn`** to scroll by page
 - **`Enter`** to checkout the selected branch
 - **`d`** to delete a branch (`git branch -d`); **`D`** to force-delete (`git branch -D`) or delete a remote branch
 - **`Esc`/`q`** to quit

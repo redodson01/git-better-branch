@@ -205,6 +205,26 @@ func (m tuiModel) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor++
 			m.ensureVisible()
 		}
+	case "g", "home":
+		m.cursor = 0
+		m.ensureVisible()
+	case "G", "end":
+		if len(m.selIdx) > 0 {
+			m.cursor = len(m.selIdx) - 1
+		}
+		m.ensureVisible()
+	case "pgup":
+		m.cursor -= m.viewHeight()
+		if m.cursor < 0 {
+			m.cursor = 0
+		}
+		m.ensureVisible()
+	case "pgdown":
+		m.cursor += m.viewHeight()
+		if m.cursor > len(m.selIdx)-1 {
+			m.cursor = len(m.selIdx) - 1
+		}
+		m.ensureVisible()
 	case "enter":
 		m.chosen = m.items[m.selIdx[m.cursor]].branch
 		return m, tea.Quit
