@@ -7,12 +7,33 @@ A better `git branch` viewer for repositories with long branch names, worktrees,
 
 ## The problem
 
+<!-- These examples intentionally use this repo's own short branch names rather
+     than fabricated long names. Long-name examples look dramatic in a narrow
+     editor, but GitHub's code blocks scroll horizontally, so "The solution"
+     example just gets truncated — defeating the purpose. The screenshots below
+     demonstrate the tool's value with realistic output. -->
+
 `git branch -avv` becomes unreadable when working with long branch names (e.g., ticket IDs), worktree paths, and hundreds of remote branches:
 
 ```
-+ jdoe/APP-2847-add-multi-factor-authentication-to-user-login-flow        a1b2c3d4 (/Users/jdoe/code/webapp/.worktrees/APP-2847) [origin/jdoe/APP-2847-add-multi-factor-authentication-to-user-login-flow] Add TOTP and WebAuthn support to login controller
-+ msmith/APP-3021-refactor-notification-preferences-api-with-bulk-update  f5e6d7c8 (/Users/jdoe/code/webapp/.worktrees/APP-3021) [origin/msmith/APP-3021-refactor-notification-preferences-api-with-bulk-update] Replace N+1 queries with batch upsert for notification preferences
-* main                                                                    90ab12cd [origin/main] Merge pull request #847 from webapp/fix-session-timeout
+  ahead                   b38bdb6 [origin/ahead: ahead 1] Empty commit
+  behind                  0e3c069 [origin/behind: behind 1] Add GoReleaser relea
+se workflow and Homebrew tap support
+  diverged                9893a15 [origin/diverged: ahead 1, behind 1] Empty com
+mit
+  gone                    4a820a9 [origin/gone: gone] Add version badge to READM
+E
+  local                   4a820a9 Add version badge to README
+* main                    4a820a9 [origin/main] Add version badge to README
+  upstream                4a820a9 [origin/main] Add version badge to README
++ worktree                4a820a9 (/Users/rich/Developer/git-better-branch/workt
+ree) [origin/worktree] Add version badge to README
+  remotes/origin/HEAD     -> origin/main
+  remotes/origin/ahead    4a820a9 Add version badge to README
+  remotes/origin/behind   4a820a9 Add version badge to README
+  remotes/origin/diverged 4a820a9 Add version badge to README
+  remotes/origin/main     4a820a9 Add version badge to README
+  remotes/origin/worktree 4a820a9 Add version badge to README
 ```
 
 ## The solution
@@ -20,15 +41,36 @@ A better `git branch` viewer for repositories with long branch names, worktrees,
 `git better-branch` gives you the same information in a compact, readable format:
 
 ```
-* main                            origin  90ab12c Merge pull request…
-+ jdoe/APP-2847-add-multi-fac…   origin  a1b2c3d Add TOTP and Web…
-+ msmith/APP-3021-refactor-no…   origin  f5e6d7c Replace N+1 quer…
+* main            origin       4a820a9  Add version badge to README
++ worktree        origin       4a820a9  Add version badge to README [worktree]
+  ahead     ↑1    origin       b38bdb6  Empty commit
+  behind    ↓1    origin       0e3c069  Add GoReleaser release workflow and Hom…
+  diverged  ↑1↓1  origin       9893a15  Empty commit
+  gone      gone  origin       4a820a9  Add version badge to README
+  local           local        4a820a9  Add version badge to README
+  upstream        origin/main  4a820a9  Add version badge to README
+
+  ahead           origin       4a820a9  Add version badge to README
+  behind          origin       4a820a9  Add version badge to README
+  diverged        origin       4a820a9  Add version badge to README
+  main            origin       4a820a9  Add version badge to README
+  worktree        origin       4a820a9  Add version badge to README
 ```
 
-| Normal mode | Interactive mode |
-|---|---|
-| ![Normal mode — Solarized Light](doc/normal-light.png) | ![Interactive mode — Solarized Light](doc/interactive-light.png) |
-| ![Normal mode — Solarized Dark](doc/normal-dark.png) | ![Interactive mode — Solarized Dark](doc/interactive-dark.png) |
+<table>
+<tr>
+<th width="50%">Normal mode</th>
+<th width="50%">Interactive mode</th>
+</tr>
+<tr>
+<td><img src="doc/normal-light.png" alt="Normal mode — Solarized Light"></td>
+<td><img src="doc/interactive-light.png" alt="Interactive mode — Solarized Light"></td>
+</tr>
+<tr>
+<td><img src="doc/normal-dark.png" alt="Normal mode — Solarized Dark"></td>
+<td><img src="doc/interactive-dark.png" alt="Interactive mode — Solarized Dark"></td>
+</tr>
+</table>
 
 Features:
 
