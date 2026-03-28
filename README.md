@@ -19,10 +19,15 @@ A better `git branch` viewer for repositories with long branch names, worktrees,
 `git better-branch` gives you the same information in a compact, readable format:
 
 ```
-* main                              origin  90ab12c Merge pull request #847 from webapp/fix-session-tim…
-+ jdoe/APP-2847-add-multi-facto…    origin  a1b2c3d Add TOTP and WebAuthn support to login controller [APP-2847]
-+ msmith/APP-3021-refactor-noti…    origin  f5e6d7c Replace N+1 queries with batch upsert for notifica… [APP-3021]
+* main                            origin  90ab12c Merge pull request…
++ jdoe/APP-2847-add-multi-fac…   origin  a1b2c3d Add TOTP and Web…
++ msmith/APP-3021-refactor-no…   origin  f5e6d7c Replace N+1 quer…
 ```
+
+| Normal mode | Interactive mode |
+|---|---|
+| ![Normal mode — Solarized Light](doc/normal-light.png) | ![Interactive mode — Solarized Light](doc/interactive-light.png) |
+| ![Normal mode — Solarized Dark](doc/normal-dark.png) | ![Interactive mode — Solarized Dark](doc/interactive-dark.png) |
 
 Features:
 

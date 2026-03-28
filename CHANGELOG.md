@@ -7,14 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- Passthrough of unrecognized flags and arguments to `git branch`
-
-### Changed
-
-- `-v` is no longer an alias for `--version`; it now passes through to `git branch -v`
-
 ## [0.1.0] - 2026-03-27
 
 ### Added
@@ -27,9 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remote branch listing with `-a` flag, displayed inline with red coloring
 - Auto-pager via `less -RFX` when output exceeds terminal height
 - Interactive branch picker (`-i`) with bubbletea TUI
-- Fuzzy search in interactive mode (`/` to search branch and remote names)
+- Fuzzy search in interactive mode (`/` to search, `Enter` to confirm and return to normal mode)
 - Checkout on `Enter` in interactive mode (creates local tracking branch for remotes)
-- Branch deletion in interactive mode (`d` for safe delete, `D` for force delete) with merge pre-check and confirmation prompt
+- Branch deletion in interactive mode (`d` for safe delete, `D` for force delete) with merge pre-check, confirmation prompt, and remote branch support
+- Passthrough of unrecognized flags and arguments to `git branch`
 - Reverse-video selection with colored column gaps for clean highlighting
 - `--no-color` flag and `NO_COLOR` environment variable support
 - Makefile with `build`, `install`, `uninstall`, `clean`, `test`, and `lint` targets
